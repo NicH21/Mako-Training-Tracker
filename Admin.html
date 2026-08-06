@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Session Setup — Squad Timer</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --pool-deep:      #061826;
+    --pool-mid:       #0d2c3f;
+    --lane-rope:      #f2c14e;
+    --lane-rope-dim:  #a9893a;
+    --foam:           #eef6f5;
+    --slate:          #5c7a8a;
+    --coral:          #ff6b5e;
+    --green-go:       #4ecb8d;
+    --font-display:   'Oswald', sans-serif;
+    --font-body:      'Inter', sans-serif;
+    --font-mono:      'Space Mono', monospace;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0;
+    background:radial-gradient(ellipse at top, var(--pool-mid) 0%, var(--pool-deep) 70%);
+    color:var(--foam);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .lane-band{
+    height:6px; width:100%;
+    background:repeating-linear-gradient(90deg,var(--lane-rope) 0px,var(--lane-rope) 22px,var(--pool-deep) 22px,var(--pool-deep) 34px);
+    opacity:.55;
+  }
+
+  header{
+    padding:20px 20px 8px;
+    max-width:760px;
+    margin:0 auto;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 4px;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:clamp(26px,5vw,36px);
+    margin:0;
+  }
+  .live-link{
+    font-family:var(--font-body);
+    font-size:13px;
+    color:var(--slate);
+    text-decoration:none;
+    border:1px solid rgba(255,255,255,0.15);
+    padding:8px 14px;
+    border-radius:8px;
+  }
+  .live-link:hover{ color:var(--lane-rope); border-color:var(--lane-rope); }
+
+  main{
+    max-width:760px;
+    margin:0 auto;
+    padding:20px;
+  }
+
+  .panel{
+    background:rgba(255,255,255,0.03);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:14px;
+    padding:22px;
+    margin-bottom:18px;
+  }
+
+  .panel h2{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:16px;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 16px;
+  }
+
+  .field{ margin-bottom:16px; }
+  .field label{
+    display:block;
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--slate);
+    margin-bottom:6px;
+  }
+  .field input[type=number], .field input[type=text]{
+    background:var(--pool-deep);
+    border:1px solid rgba(255,255,255,0.15);
+    color:var(--foam);
+    font-family:var(--font-mono);
+    font-size:20px;
+    padding:10px 12px;
+    border-radius:8px;
+    width:100%;
+    max-width:220px;
+  }
+  .field input:focus{ outline:2px solid var(--lane-rope); outline-offset:1px; }
+
+  .roster-picker{
+    display:flex; flex-wrap:wrap; gap:8px;
+    margin-bottom:6px;
+  }
+  .roster-chip{
+    padding:9px 14px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,0.18);
+    background:transparent;
+    color:var(--foam);
+    font-family:var(--font-body);
+    font-size:14px;
+    cursor:pointer;
+    user-select:none;
+  }
+  .roster-chip.selected{
+    background:var(--lane-rope);
+    border-color:var(--lane-rope);
+    color:var(--pool-deep);
+    font-weight:600;
+  }
+  .roster-empty{
+    color:var(--slate);
+    font-size:13px;
+    font-style:italic;
+  }
+
+  .add-swimmer{
+    display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;
+    margin-top:14px;
+    padding-top:14px;
+    border-top:1px solid rgba(255,255,255,0.08);
+  }
+  .add-swimmer .field{ margin-bottom:0; }
+  .add-swimmer input{
+    font-family:var(--font-body);
+    font-size:15px;
+    width:160px;
+  }
+  .btn-ghost{
+    background:transparent;
+    border:1px solid rgba(255,255,255,0.25);
+    color:var(--foam);
+    padding:10px 16px;
+    border-radius:8px;
+    font-family:var(--font-body);
+    font-size:14px;
+    cursor:pointer;
+    height:41px;
+  }
+  .btn-ghost:hover{ border-color:var(--lane-rope); color:var(--lane-rope); }
+
+  .btn-start{
+    background:var(--lane-rope);
+    color:var(--pool-deep);
+    border:none;
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:18px;
+    letter-spacing:.03em;
+    padding:16px 30px;
+    border-radius:10px;
+    cursor:pointer;
+    text-transform:uppercase;
+    width:100%;
+  }
+  .btn-start:disabled{ opacity:.35; cursor:not-allowed; }
+  .btn-start:not(:disabled):active{ transform:translateY(1px); }
+
+  .selected-count{
+    font-size:13px;
+    color:var(--slate);
+    margin-top:10px;
+  }
+  .selected-count strong{ color:var(--green-go); }
+
+  /* ── Active session notice ───────────────────────── */
+  .active-notice{
+    background:rgba(255,107,94,0.1);
+    border:1px solid rgba(255,107,94,0.4);
+    border-radius:14px;
+    padding:18px 22px;
+    margin-bottom:18px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  .active-notice.hidden{ display:none; }
+  .active-notice p{
+    margin:0;
+    font-size:14px;
+    color:var(--foam);
+  }
+  .active-notice strong{ color:var(--coral); }
+  .btn-end{
+    background:transparent;
+    border:1px solid var(--coral);
+    color:var(--coral);
+    padding:9px 16px;
+    border-radius:8px;
+    font-family:var(--font-body);
+    font-size:13px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  footer{
+    text-align:center;
+    color:var(--slate);
+    font-size:12px;
+    padding:10px 20px 30px;
+  }
+</style>
+</head>
+<body>
+
+<div class="lane-band"></div>
+
+<header>
+  <div>
+    <p class="eyebrow">Squad Timer — Setup</p>
+    <h1>Session Setup</h1>
+  </div>
+  <a class="live-link" href="index.html">← Back to live board</a>
+</header>
+
+<main>
+
+  <!-- shown only when a session is already running -->
+  <div class="active-notice hidden" id="activeNotice">
+    <p>A session is already <strong>live</strong> — end it before starting a new one.</p>
+    <button class="btn-end" id="endSessionBtn">End current session</button>
+  </div>
+
+  <section class="panel" id="setupPanel">
+    <h2>New session</h2>
+
+    <div class="field">
+      <label for="distanceInput">Distance (m)</label>
+      <input type="number" id="distanceInput" placeholder="1500" step="50" min="50">
+    </div>
+
+    <label style="display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--slate); margin-bottom:8px;">
+      Swimmers today
+    </label>
+    <div class="roster-picker" id="rosterPicker">
+      <p class="roster-empty">No swimmers on the roster yet — add one below.</p>
+    </div>
+    <p class="selected-count" id="selectedCount"></p>
+
+    <div class="add-swimmer">
+      <div class="field">
+        <label for="newName">Name</label>
+        <input type="text" id="newName" placeholder="Name">
+      </div>
+      <div class="field">
+        <label for="newSurname">Surname</label>
+        <input type="text" id="newSurname" placeholder="Surname">
+      </div>
+      <button class="btn-ghost" id="addSwimmerBtn">+ Add to roster</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <button class="btn-start" id="startBtn" disabled>Start session</button>
+  </section>
+
+</main>
+
+<footer>Session data syncs live to the poolside board the moment you press Start.</footer>
+
+<script>
+/* ============================================================
+   FIREBASE CONFIG — replace with your own project's config
+   Use the SAME config on index.html and admin.html
+   ============================================================ */
+const firebaseConfig = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:         "YOUR_PROJECT.firebaseapp.com",
+  databaseURL:        "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId:          "YOUR_PROJECT",
+  storageBucket:      "YOUR_PROJECT.appspot.com",
+  messagingSenderId:  "YOUR_SENDER_ID",
+  appId:              "YOUR_APP_ID"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const setupPanel        = document.getElementById('setupPanel');
+const activeNotice       = document.getElementById('activeNotice');
+const endSessionBtn      = document.getElementById('endSessionBtn');
+const distanceInput      = document.getElementById('distanceInput');
+const startBtn           = document.getElementById('startBtn');
+const rosterPicker       = document.getElementById('rosterPicker');
+const selectedCountEl    = document.getElementById('selectedCount');
+const addSwimmerBtn      = document.getElementById('addSwimmerBtn');
+const newNameInput       = document.getElementById('newName');
+const newSurnameInput    = document.getElementById('newSurname');
+
+let roster = {};
+let selectedIds = new Set();
+let sessionActive = false;
+
+/* ---------- Roster: load + render picker chips ---------- */
+db.ref('roster').on('value', snap => {
+  roster = snap.val() || {};
+  renderRosterPicker();
+});
+
+function renderRosterPicker(){
+  const ids = Object.keys(roster);
+  if(ids.length === 0){
+    rosterPicker.innerHTML = '<p class="roster-empty">No swimmers on the roster yet — add one below.</p>';
+    return;
+  }
+  rosterPicker.innerHTML = '';
+  ids.forEach(id => {
+    const s = roster[id];
+    const chip = document.createElement('button');
+    chip.className = 'roster-chip' + (selectedIds.has(id) ? ' selected' : '');
+    chip.textContent = `${s.name} ${s.surname}`;
+    chip.onclick = () => {
+      selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
+      renderRosterPicker();
+      validateStart();
+    };
+    rosterPicker.appendChild(chip);
+  });
+  selectedCountEl.innerHTML = selectedIds.size
+    ? `<strong>${selectedIds.size}</strong> swimmer${selectedIds.size === 1 ? '' : 's'} selected`
+    : '';
+}
+
+addSwimmerBtn.onclick = () => {
+  const name = newNameInput.value.trim();
+  const surname = newSurnameInput.value.trim();
+  if(!name || !surname) return;
+  const newRef = db.ref('roster').push();
+  newRef.set({ name, surname });
+  newNameInput.value = '';
+  newSurnameInput.value = '';
+};
+
+function validateStart(){
+  const dist = parseInt(distanceInput.value, 10);
+  startBtn.disabled = !(dist > 0 && selectedIds.size > 0) || sessionActive;
+}
+distanceInput.addEventListener('input', validateStart);
+
+/* ---------- Watch for an already-active session ---------- */
+db.ref('liveSession').on('value', snap => {
+  const session = snap.val();
+  sessionActive = !!(session && session.active);
+
+  if(sessionActive){
+    activeNotice.classList.remove('hidden');
+    setupPanel.style.opacity = '0.4';
+    setupPanel.style.pointerEvents = 'none';
+  } else {
+    activeNotice.classList.add('hidden');
+    setupPanel.style.opacity = '1';
+    setupPanel.style.pointerEvents = 'auto';
+  }
+  validateStart();
+});
+
+endSessionBtn.onclick = () => {
+  if(!confirm('End the current session? The live board will clear for everyone.')) return;
+  db.ref('liveSession').remove();
+};
+
+/* ---------- Start session ---------- */
+startBtn.onclick = () => {
+  const distance = parseInt(distanceInput.value, 10);
+  const startTime = firebase.database.ServerValue.TIMESTAMP;
+
+  const swimmers = {};
+  selectedIds.forEach(id => {
+    swimmers[id] = {
+      name: roster[id].name,
+      surname: roster[id].surname,
+      remaining: distance,
+      finished: false,
+      finishTimeMs: null
+    };
+  });
+
+  db.ref('liveSession').set({
+    distance,
+    startTime,
+    active: true,
+    swimmers
+  }).then(() => {
+    window.location.href = 'index.html';
+  });
+};
+
+validateStart();
+</script>
+</body>
+</html>

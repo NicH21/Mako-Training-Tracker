@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Live — Squad Timer</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --pool-deep:      #061826;
+    --pool-mid:       #0d2c3f;
+    --lane-rope:      #f2c14e;
+    --lane-rope-dim:  #a9893a;
+    --foam:           #eef6f5;
+    --slate:          #5c7a8a;
+    --coral:          #ff6b5e;
+    --green-go:       #4ecb8d;
+    --font-display:   'Oswald', sans-serif;
+    --font-body:      'Inter', sans-serif;
+    --font-mono:      'Space Mono', monospace;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0;
+    background:radial-gradient(ellipse at top, var(--pool-mid) 0%, var(--pool-deep) 70%);
+    color:var(--foam);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .lane-band{
+    height:6px; width:100%;
+    background:repeating-linear-gradient(90deg,var(--lane-rope) 0px,var(--lane-rope) 22px,var(--pool-deep) 22px,var(--pool-deep) 34px);
+    opacity:.55;
+  }
+
+  header{
+    padding:20px 20px 8px;
+    max-width:1100px;
+    margin:0 auto;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 4px;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:clamp(28px,5vw,40px);
+    margin:0;
+  }
+  .admin-link{
+    font-family:var(--font-body);
+    font-size:13px;
+    color:var(--slate);
+    text-decoration:none;
+    border:1px solid rgba(255,255,255,0.15);
+    padding:8px 14px;
+    border-radius:8px;
+  }
+  .admin-link:hover{ color:var(--lane-rope); border-color:var(--lane-rope); }
+
+  .session-bar{
+    max-width:1100px;
+    margin:0 auto 20px;
+    padding:16px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:12px;
+    background:rgba(78,203,141,0.08);
+    border:1px solid rgba(78,203,141,0.35);
+    border-radius:14px;
+  }
+  .session-bar.hidden{ display:none; }
+  .session-bar .distance-label{
+    font-family:var(--font-display);
+    font-size:22px;
+    color:var(--green-go);
+  }
+  .master-clock{
+    font-family:var(--font-mono);
+    font-size:28px;
+    letter-spacing:.02em;
+  }
+
+  .empty-state{
+    max-width:600px;
+    margin:60px auto;
+    padding:0 20px;
+    text-align:center;
+  }
+  .empty-state.hidden{ display:none; }
+  .empty-state p.big{
+    font-family:var(--font-display);
+    font-size:24px;
+    margin-bottom:10px;
+  }
+  .empty-state p.small{
+    color:var(--slate);
+    font-size:14px;
+    margin-bottom:24px;
+  }
+  .empty-state a{
+    display:inline-block;
+    background:var(--lane-rope);
+    color:var(--pool-deep);
+    font-family:var(--font-display);
+    font-weight:600;
+    text-decoration:none;
+    padding:14px 28px;
+    border-radius:10px;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+  }
+
+  .grid{
+    max-width:1100px;
+    margin:0 auto 40px;
+    padding:0 20px;
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(230px,1fr));
+    gap:14px;
+  }
+
+  .card{
+    position:relative;
+    background:var(--pool-mid);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:16px;
+    overflow:hidden;
+    cursor:pointer;
+    -webkit-user-select:none; user-select:none;
+    transition:transform .06s ease;
+    min-height:150px;
+    display:flex;
+    flex-direction:column;
+  }
+  .card:active{ transform:scale(.97); }
+  .card .rope{
+    height:4px;
+    background:repeating-linear-gradient(90deg,var(--lane-rope-dim) 0 10px,transparent 10px 16px);
+  }
+  .card-body{
+    padding:16px 16px 14px;
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+  }
+  .swimmer-name{
+    font-family:var(--font-display);
+    font-size:19px;
+    font-weight:600;
+    margin:0 0 2px;
+  }
+  .swimmer-sub{
+    font-size:12px;
+    color:var(--slate);
+    margin:0 0 12px;
+  }
+  .remaining{
+    font-family:var(--font-mono);
+    font-size:38px;
+    font-weight:700;
+    line-height:1;
+    color:var(--foam);
+  }
+  .remaining .unit{
+    font-size:15px;
+    color:var(--slate);
+    font-weight:400;
+    margin-left:4px;
+  }
+  .tap-hint{
+    font-size:11px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--lane-rope-dim);
+    margin-top:8px;
+  }
+
+  .card.finished{
+    background:linear-gradient(160deg, rgba(78,203,141,0.18), var(--pool-mid) 60%);
+    border-color:var(--green-go);
+    cursor:default;
+  }
+  .card.finished .remaining{ color:var(--green-go); font-size:30px; }
+  .card.finished .tap-hint{ color:var(--green-go); }
+
+  footer{
+    text-align:center;
+    color:var(--slate);
+    font-size:12px;
+    padding:20px;
+  }
+
+  @media (max-width:480px){
+    .grid{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+    .remaining{ font-size:30px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="lane-band"></div>
+
+<header>
+  <div>
+    <p class="eyebrow">Squad Timer — Live</p>
+    <h1>Poolside</h1>
+  </div>
+  <a class="admin-link" href="admin.html">Session setup →</a>
+</header>
+
+<section class="session-bar hidden" id="sessionBar">
+  <div class="distance-label" id="sessionDistanceLabel">1500m</div>
+  <div class="master-clock" id="masterClock">00:00.00</div>
+</section>
+
+<div class="empty-state" id="emptyState">
+  <p class="big">No session running</p>
+  <p class="small">Head to session setup to enter a distance, pick swimmers, and start the clock.</p>
+  <a href="admin.html">Set up a session</a>
+</div>
+
+<section class="grid" id="swimmerGrid"></section>
+
+<footer>Tap a name after every 2 laps (50m) &middot; times lock automatically at zero</footer>
+
+<script>
+/* ============================================================
+   FIREBASE CONFIG — replace with your own project's config
+   (Firebase console → Project settings → Your apps → SDK config)
+   Use the SAME config on index.html and admin.html
+   ============================================================ */
+const firebaseConfig = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:         "YOUR_PROJECT.firebaseapp.com",
+  databaseURL:        "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId:          "YOUR_PROJECT",
+  storageBucket:      "YOUR_PROJECT.appspot.com",
+  messagingSenderId:  "YOUR_SENDER_ID",
+  appId:              "YOUR_APP_ID"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const TAP_DECREMENT_M = 50; // one tap = 2 laps (25m pool)
+
+const sessionBar          = document.getElementById('sessionBar');
+const sessionDistanceLabel = document.getElementById('sessionDistanceLabel');
+const masterClock          = document.getElementById('masterClock');
+const emptyState           = document.getElementById('emptyState');
+const swimmerGrid          = document.getElementById('swimmerGrid');
+
+let clockInterval = null;
+
+/* ---------- Live session listener ---------- */
+db.ref('liveSession').on('value', snap => {
+  const session = snap.val();
+
+  if(!session || !session.active){
+    sessionBar.classList.add('hidden');
+    emptyState.classList.remove('hidden');
+    swimmerGrid.innerHTML = '';
+    stopClock();
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+  sessionBar.classList.remove('hidden');
+  sessionDistanceLabel.textContent = `${session.distance}m`;
+  startClock(session.startTime);
+  renderSwimmerGrid(session);
+});
+
+/* ---------- Master clock ---------- */
+function startClock(startTime){
+  stopClock();
+  clockInterval = setInterval(() => {
+    masterClock.textContent = formatElapsed(Date.now() - startTime);
+  }, 47);
+}
+function stopClock(){
+  if(clockInterval) clearInterval(clockInterval);
+  clockInterval = null;
+}
+
+function formatElapsed(ms){
+  if(ms < 0) ms = 0;
+  const centis = Math.floor((ms % 1000) / 10);
+  const totalSec = Math.floor(ms / 1000);
+  const sec = totalSec % 60;
+  const min = Math.floor(totalSec / 60);
+  return `${pad(min)}:${pad(sec)}.${pad(centis)}`;
+}
+function pad(n){ return n.toString().padStart(2, '0'); }
+
+/* ---------- Swimmer grid ---------- */
+function renderSwimmerGrid(session){
+  swimmerGrid.innerHTML = '';
+  Object.entries(session.swimmers || {}).forEach(([id, s]) => {
+    const card = document.createElement('div');
+    card.className = 'card' + (s.finished ? ' finished' : '');
+
+    const rope = document.createElement('div');
+    rope.className = 'rope';
+
+    const body = document.createElement('div');
+    body.className = 'card-body';
+
+    const nameEl = document.createElement('p');
+    nameEl.className = 'swimmer-name';
+    nameEl.textContent = `${s.name} ${s.surname}`;
+
+    const subEl = document.createElement('p');
+    subEl.className = 'swimmer-sub';
+    subEl.textContent = `${session.distance}m swim`;
+
+    const remainingEl = document.createElement('div');
+    if(s.finished){
+      remainingEl.className = 'remaining';
+      remainingEl.textContent = formatElapsed(s.finishTimeMs);
+    } else {
+      remainingEl.className = 'remaining';
+      remainingEl.innerHTML = `${s.remaining}<span class="unit">m left</span>`;
+    }
+
+    const hint = document.createElement('p');
+    hint.className = 'tap-hint';
+    hint.textContent = s.finished ? 'Finished' : 'Tap after every 2 laps';
+
+    body.appendChild(nameEl);
+    body.appendChild(subEl);
+    body.appendChild(remainingEl);
+    body.appendChild(hint);
+    card.appendChild(rope);
+    card.appendChild(body);
+
+    if(!s.finished){
+      card.onclick = () => tapSwimmer(id, session.startTime);
+    }
+
+    swimmerGrid.appendChild(card);
+  });
+}
+
+/* ---------- Tap handler (atomic transaction) ---------- */
+function tapSwimmer(id, startTime){
+  const swimmerRef = db.ref(`liveSession/swimmers/${id}`);
+
+  swimmerRef.transaction(current => {
+    if(!current || current.finished) return current;
+
+    const newRemaining = current.remaining - TAP_DECREMENT_M;
+
+    if(newRemaining <= 0){
+      current.remaining = 0;
+      current.finished = true;
+      current.finishTimeMs = Date.now() - startTime;
+    } else {
+      current.remaining = newRemaining;
+    }
+    return current;
+  }, (error, committed, snap) => {
+    if(committed){
+      const val = snap.val();
+      if(val.finished){
+        saveToHistory(id, val);
+      }
+    }
+  });
+}
+
+/* ---------- Save finished swim to permanent history ---------- */
+function saveToHistory(id, swimmerState){
+  db.ref('liveSession').once('value', s => {
+    const session = s.val();
+    if(!session) return;
+    const entry = {
+      date: new Date().toISOString(),
+      event: `${session.distance}m`,
+      timeMs: swimmerState.finishTimeMs
+    };
+    db.ref(`swimmerTimes/${id}`).push(entry);
+  });
+}
+</script>
+</body>
+</html>
