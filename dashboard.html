@@ -117,6 +117,15 @@
     margin-bottom:18px;
   }
 
+  .panel-header-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:16px;
+  }
+
   .panel h2{
     font-family:var(--font-display);
     font-weight:600;
@@ -124,10 +133,9 @@
     letter-spacing:.02em;
     text-transform:uppercase;
     color:var(--lane-rope);
-    margin:0 0 16px;
+    margin:0;
   }
 
-  /* ── Swimmer picker (individual tab) ─────────────── */
   .picker-row{
     display:flex; flex-wrap:wrap; gap:8px;
     margin-bottom:6px;
@@ -154,7 +162,6 @@
     font-style:italic;
   }
 
-  /* ── Stat cards ───────────────────────────────────── */
   .stat-row{
     display:grid;
     grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
@@ -194,7 +201,6 @@
     margin-bottom:8px;
   }
 
-  /* ── History table ────────────────────────────────── */
   table{
     width:100%;
     border-collapse:collapse;
@@ -217,8 +223,30 @@
   }
   td.delta-good{ color:var(--green-go); }
   td.delta-bad{ color:var(--coral); }
+  .pb-badge{
+    display:inline-block;
+    background:var(--lane-rope);
+    color:var(--pool-deep);
+    font-family:var(--font-mono);
+    font-size:10px;
+    font-weight:700;
+    padding:2px 6px;
+    border-radius:5px;
+    margin-left:8px;
+    letter-spacing:.03em;
+  }
+  .row-delete{
+    background:transparent;
+    border:1px solid rgba(255,107,94,0.35);
+    color:var(--coral);
+    font-family:var(--font-body);
+    font-size:11px;
+    padding:5px 10px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .row-delete:hover{ border-color:var(--coral); }
 
-  /* ── Squad tab event filter ───────────────────────── */
   .event-filter{
     display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;
   }
@@ -237,6 +265,45 @@
     border-color:var(--lane-rope);
     color:var(--pool-deep);
     font-weight:700;
+  }
+
+  .btn-ghost{
+    background:transparent;
+    border:1px solid rgba(255,255,255,0.25);
+    color:var(--foam);
+    padding:8px 14px;
+    border-radius:8px;
+    font-family:var(--font-body);
+    font-size:13px;
+    cursor:pointer;
+  }
+  .btn-ghost:hover{ border-color:var(--lane-rope); color:var(--lane-rope); }
+
+  .leaderboard-row{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:12px 4px;
+    border-bottom:1px solid rgba(255,255,255,0.05);
+  }
+  .leaderboard-rank{
+    font-family:var(--font-display);
+    font-size:18px;
+    font-weight:600;
+    color:var(--lane-rope-dim);
+    width:28px;
+  }
+  .leaderboard-row:nth-child(1) .leaderboard-rank{ color:var(--lane-rope); }
+  .leaderboard-name{ flex:1; font-size:15px; }
+  .leaderboard-time{
+    font-family:var(--font-mono);
+    font-size:16px;
+    font-weight:700;
+  }
+  .leaderboard-sub{
+    font-size:11px;
+    color:var(--slate);
+    margin-left:8px;
   }
 
   footer{
@@ -267,19 +334,23 @@
   <div class="tabs">
     <button class="tab-btn active" id="tabIndividual">Individual</button>
     <button class="tab-btn" id="tabSquad">Whole squad</button>
+    <button class="tab-btn" id="tabLeaderboard">Leaderboard</button>
   </div>
 
   <!-- ============ INDIVIDUAL VIEW ============ -->
   <section class="view active" id="viewIndividual">
     <section class="panel">
       <h2>Choose a swimmer</h2>
-      <div class="picker-row" id="swimmerPicker">
+      <div class="picker-row" id="swimmerPicker" style="margin-top:14px;">
         <p class="empty-note">No swimmers on the roster yet.</p>
       </div>
     </section>
 
     <section class="panel" id="individualPanel" style="display:none;">
-      <h2 id="individualHeading">—</h2>
+      <div class="panel-header-row">
+        <h2 id="individualHeading">—</h2>
+        <button class="btn-ghost" id="exportSwimmerBtn">Export CSV</button>
+      </div>
 
       <div class="event-filter" id="individualEventFilter" style="margin-bottom:18px;"></div>
 
@@ -299,13 +370,18 @@
           <p class="stat-value" id="statDelta">—</p>
           <p class="stat-sub" id="statDeltaSub">—</p>
         </div>
+        <div class="stat-card">
+          <p class="stat-label">Sessions swum</p>
+          <p class="stat-value" id="statCount">—</p>
+          <p class="stat-sub" id="statCountSub">—</p>
+        </div>
       </div>
 
       <div class="chart-wrap"><canvas id="individualChart"></canvas></div>
 
       <table>
         <thead>
-          <tr><th>Date</th><th>Event</th><th>Time</th><th>Change</th></tr>
+          <tr><th>Date</th><th>Event</th><th>Time</th><th>Change</th><th></th></tr>
         </thead>
         <tbody id="historyTableBody"></tbody>
       </table>
@@ -315,9 +391,21 @@
   <!-- ============ SQUAD VIEW ============ -->
   <section class="view" id="viewSquad">
     <section class="panel">
-      <h2>Event</h2>
+      <div class="panel-header-row">
+        <h2>Event</h2>
+        <button class="btn-ghost" id="exportSquadBtn">Export all as CSV</button>
+      </div>
       <div class="event-filter" id="eventFilter"></div>
       <div class="chart-wrap"><canvas id="squadChart"></canvas></div>
+    </section>
+  </section>
+
+  <!-- ============ LEADERBOARD VIEW ============ -->
+  <section class="view" id="viewLeaderboard">
+    <section class="panel">
+      <h2>Fastest times</h2>
+      <div class="event-filter" id="leaderboardEventFilter" style="margin-top:14px;"></div>
+      <div id="leaderboardList"></div>
     </section>
   </section>
 
@@ -326,9 +414,6 @@
 <footer>Times pulled live from every recorded session.</footer>
 
 <script>
-/* ============================================================
-   FIREBASE CONFIG — same project as index.html and admin.html
-   ============================================================ */
 const firebaseConfig = {
   apiKey:            "AIzaSyBj4RW9UFi9EM-sMb-RVycurfDFZqpI1RM",
   authDomain:         "mako-training.firebaseapp.com",
@@ -345,24 +430,29 @@ const db = firebase.database();
 const CHART_GRID_COLOR = 'rgba(255,255,255,0.06)';
 const CHART_TEXT_COLOR = '#5c7a8a';
 
-let roster = {};        // { id: {name, surname} }
-let allTimes = {};       // { id: { entryId: {date, event, timeMs} } }
+let roster = {};
+let allTimes = {};
 let selectedSwimmerId = null;
-let selectedIndividualEvent = null; // null = show all events for this swimmer
+let selectedIndividualEvent = null;
 let selectedEvent = null;
+let selectedLeaderboardEvent = null;
 let individualChart = null;
 let squadChart = null;
 
 /* ---------- Tabs ---------- */
 document.getElementById('tabIndividual').onclick = () => switchTab('individual');
 document.getElementById('tabSquad').onclick = () => switchTab('squad');
+document.getElementById('tabLeaderboard').onclick = () => switchTab('leaderboard');
 
 function switchTab(tab){
   document.getElementById('tabIndividual').classList.toggle('active', tab === 'individual');
   document.getElementById('tabSquad').classList.toggle('active', tab === 'squad');
+  document.getElementById('tabLeaderboard').classList.toggle('active', tab === 'leaderboard');
   document.getElementById('viewIndividual').classList.toggle('active', tab === 'individual');
   document.getElementById('viewSquad').classList.toggle('active', tab === 'squad');
+  document.getElementById('viewLeaderboard').classList.toggle('active', tab === 'leaderboard');
   if(tab === 'squad') renderSquadChart();
+  if(tab === 'leaderboard') renderLeaderboard();
 }
 
 /* ---------- Load roster ---------- */
@@ -376,8 +466,10 @@ db.ref('swimmerTimes').on('value', snap => {
   allTimes = snap.val() || {};
   renderSwimmerPicker();
   renderEventFilter();
+  renderLeaderboardEventFilter();
   if(selectedSwimmerId) renderIndividual(selectedSwimmerId);
   renderSquadChart();
+  renderLeaderboard();
 });
 
 /* ---------- Swimmer picker ---------- */
@@ -396,7 +488,7 @@ function renderSwimmerPicker(){
     chip.textContent = `${s.name} ${s.surname}`;
     chip.onclick = () => {
       selectedSwimmerId = id;
-      selectedIndividualEvent = null; // reset to "all events" for the newly chosen swimmer
+      selectedIndividualEvent = null;
       renderSwimmerPicker();
       renderIndividual(id);
     };
@@ -408,29 +500,21 @@ function renderSwimmerPicker(){
 function renderIndividual(id){
   const panel = document.getElementById('individualPanel');
   const swimmer = roster[id];
-  const allEntries = Object.values(allTimes[id] || {})
+  const allEntries = Object.entries(allTimes[id] || {})
+    .map(([entryId, e]) => ({ ...e, entryId }))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
   if(!swimmer || allEntries.length === 0){
     panel.style.display = 'block';
     document.getElementById('individualHeading').textContent = swimmer ? `${swimmer.name} ${swimmer.surname}` : '—';
     document.getElementById('individualEventFilter').innerHTML = '';
-    document.getElementById('statBest').textContent = '—';
-    document.getElementById('statBestSub').textContent = 'No recorded swims yet';
-    document.getElementById('statLast').textContent = '—';
-    document.getElementById('statLastSub').textContent = '';
-    document.getElementById('statDelta').textContent = '—';
-    document.getElementById('statDeltaSub').textContent = '';
-    document.getElementById('historyTableBody').innerHTML = '';
-    if(individualChart){ individualChart.destroy(); individualChart = null; }
+    resetIndividualStats('No recorded swims yet');
     return;
   }
 
   panel.style.display = 'block';
   document.getElementById('individualHeading').textContent = `${swimmer.name} ${swimmer.surname}`;
 
-  // Build the event filter from whatever distances this swimmer actually has —
-  // works for any race distance, no hardcoded list.
   const swimmerEvents = [...new Set(allEntries.map(e => e.event))];
   renderIndividualEventFilter(swimmerEvents);
 
@@ -439,14 +523,7 @@ function renderIndividual(id){
     : allEntries;
 
   if(entries.length === 0){
-    document.getElementById('statBest').textContent = '—';
-    document.getElementById('statBestSub').textContent = 'No swims recorded for this event yet';
-    document.getElementById('statLast').textContent = '—';
-    document.getElementById('statLastSub').textContent = '';
-    document.getElementById('statDelta').textContent = '—';
-    document.getElementById('statDeltaSub').textContent = '';
-    document.getElementById('historyTableBody').innerHTML = '';
-    if(individualChart){ individualChart.destroy(); individualChart = null; }
+    resetIndividualStats('No swims recorded for this event yet');
     return;
   }
 
@@ -474,14 +551,62 @@ function renderIndividual(id){
     deltaSubEl.textContent = 'Need a second swim to compare';
   }
 
+  document.getElementById('statCount').textContent = entries.length;
+  document.getElementById('statCountSub').textContent = selectedIndividualEvent
+    ? `${selectedIndividualEvent} swims recorded`
+    : 'across all events';
+
   renderIndividualChart(entries);
-  renderHistoryTable(entries);
+  renderHistoryTable(entries, best.entryId);
+
+  document.getElementById('exportSwimmerBtn').onclick = () => exportCsv(
+    entries.map(e => ({ swimmer: `${swimmer.name} ${swimmer.surname}`, date: e.date, event: e.event, time: formatTime(e.timeMs) })),
+    `${swimmer.name}_${swimmer.surname}_times.csv`
+  );
+}
+
+function resetIndividualStats(message){
+  document.getElementById('statBest').textContent = '—';
+  document.getElementById('statBestSub').textContent = message;
+  document.getElementById('statLast').textContent = '—';
+  document.getElementById('statLastSub').textContent = '';
+  document.getElementById('statDelta').textContent = '—';
+  document.getElementById('statDeltaSub').textContent = '';
+  document.getElementById('statCount').textContent = '—';
+  document.getElementById('statCountSub').textContent = '';
+  document.getElementById('historyTableBody').innerHTML = '';
+  if(individualChart){ individualChart.destroy(); individualChart = null; }
+}
+
+function renderIndividualEventFilter(events){
+  const filter = document.getElementById('individualEventFilter');
+  filter.innerHTML = '';
+
+  const allChip = document.createElement('button');
+  allChip.className = 'event-chip' + (selectedIndividualEvent === null ? ' selected' : '');
+  allChip.textContent = 'All events';
+  allChip.onclick = () => {
+    selectedIndividualEvent = null;
+    renderIndividual(selectedSwimmerId);
+  };
+  filter.appendChild(allChip);
+
+  events.forEach(ev => {
+    const chip = document.createElement('button');
+    chip.className = 'event-chip' + (ev === selectedIndividualEvent ? ' selected' : '');
+    chip.textContent = ev;
+    chip.onclick = () => {
+      selectedIndividualEvent = ev;
+      renderIndividual(selectedSwimmerId);
+    };
+    filter.appendChild(chip);
+  });
 }
 
 function renderIndividualChart(entries){
   const ctx = document.getElementById('individualChart').getContext('2d');
   const labels = entries.map(e => formatDate(e.date));
-  const data = entries.map(e => e.timeMs / 1000); // seconds for readable axis
+  const data = entries.map(e => e.timeMs / 1000);
 
   if(individualChart) individualChart.destroy();
 
@@ -507,7 +632,7 @@ function renderIndividualChart(entries){
       scales: {
         x: { grid: { color: CHART_GRID_COLOR }, ticks: { color: CHART_TEXT_COLOR } },
         y: {
-          reverse: true, // lower time = better, show improvement as upward trend
+          reverse: true,
           grid: { color: CHART_GRID_COLOR },
           ticks: { color: CHART_TEXT_COLOR, callback: v => formatTime(v * 1000) }
         }
@@ -516,12 +641,12 @@ function renderIndividualChart(entries){
   });
 }
 
-function renderHistoryTable(entries){
+function renderHistoryTable(entries, bestEntryId){
   const body = document.getElementById('historyTableBody');
   body.innerHTML = '';
-  const sorted = [...entries].reverse(); // most recent first
+  const sorted = [...entries].reverse();
   sorted.forEach((e, i) => {
-    const prevEntry = sorted[i + 1]; // older entry, since reversed
+    const prevEntry = sorted[i + 1];
     const row = document.createElement('tr');
 
     const dateCell = document.createElement('td');
@@ -532,6 +657,12 @@ function renderHistoryTable(entries){
 
     const timeCell = document.createElement('td');
     timeCell.textContent = formatTime(e.timeMs);
+    if(e.entryId === bestEntryId){
+      const badge = document.createElement('span');
+      badge.className = 'pb-badge';
+      badge.textContent = 'PB';
+      timeCell.appendChild(badge);
+    }
 
     const deltaCell = document.createElement('td');
     if(prevEntry){
@@ -543,37 +674,22 @@ function renderHistoryTable(entries){
       deltaCell.textContent = '—';
     }
 
+    const actionCell = document.createElement('td');
+    const delBtn = document.createElement('button');
+    delBtn.className = 'row-delete';
+    delBtn.textContent = 'Delete';
+    delBtn.onclick = () => {
+      if(!confirm('Delete this recorded time? This cannot be undone.')) return;
+      db.ref(`swimmerTimes/${selectedSwimmerId}/${e.entryId}`).remove();
+    };
+    actionCell.appendChild(delBtn);
+
     row.appendChild(dateCell);
     row.appendChild(eventCell);
     row.appendChild(timeCell);
     row.appendChild(deltaCell);
+    row.appendChild(actionCell);
     body.appendChild(row);
-  });
-}
-
-function renderIndividualEventFilter(events){
-  const filter = document.getElementById('individualEventFilter');
-  filter.innerHTML = '';
-
-  const allChip = document.createElement('button');
-  allChip.className = 'event-chip' + (selectedIndividualEvent === null ? ' selected' : '');
-  allChip.textContent = 'All events';
-  allChip.onclick = () => {
-    selectedIndividualEvent = null;
-    renderIndividual(selectedSwimmerId);
-  };
-  filter.appendChild(allChip);
-
-  // events could be any distance the coach has ever entered (200m, 400m, 1500m, etc.)
-  events.forEach(ev => {
-    const chip = document.createElement('button');
-    chip.className = 'event-chip' + (ev === selectedIndividualEvent ? ' selected' : '');
-    chip.textContent = ev;
-    chip.onclick = () => {
-      selectedIndividualEvent = ev;
-      renderIndividual(selectedSwimmerId);
-    };
-    filter.appendChild(chip);
   });
 }
 
@@ -607,6 +723,18 @@ function renderEventFilter(){
     };
     filter.appendChild(chip);
   });
+
+  document.getElementById('exportSquadBtn').onclick = () => {
+    const rows = [];
+    Object.entries(allTimes).forEach(([id, entries]) => {
+      const swimmer = roster[id];
+      if(!swimmer) return;
+      Object.values(entries || {}).forEach(e => {
+        rows.push({ swimmer: `${swimmer.name} ${swimmer.surname}`, date: e.date, event: e.event, time: formatTime(e.timeMs) });
+      });
+    });
+    exportCsv(rows, 'squad_all_times.csv');
+  };
 }
 
 function renderSquadChart(){
@@ -642,9 +770,7 @@ function renderSquadChart(){
   const ctx = document.getElementById('squadChart').getContext('2d');
   if(squadChart) squadChart.destroy();
 
-  if(datasets.length === 0){
-    return;
-  }
+  if(datasets.length === 0) return;
 
   squadChart = new Chart(ctx, {
     type: 'line',
@@ -666,6 +792,92 @@ function renderSquadChart(){
       }
     }
   });
+}
+
+/* ---------- Leaderboard view ---------- */
+function renderLeaderboardEventFilter(){
+  const events = new Set();
+  Object.values(allTimes).forEach(swimmerEntries => {
+    Object.values(swimmerEntries || {}).forEach(e => events.add(e.event));
+  });
+
+  const filter = document.getElementById('leaderboardEventFilter');
+  filter.innerHTML = '';
+
+  if(events.size === 0){
+    filter.innerHTML = '<p class="empty-note">No recorded swims yet.</p>';
+    return;
+  }
+
+  if(!selectedLeaderboardEvent || !events.has(selectedLeaderboardEvent)){
+    selectedLeaderboardEvent = [...events][0];
+  }
+
+  events.forEach(ev => {
+    const chip = document.createElement('button');
+    chip.className = 'event-chip' + (ev === selectedLeaderboardEvent ? ' selected' : '');
+    chip.textContent = ev;
+    chip.onclick = () => {
+      selectedLeaderboardEvent = ev;
+      renderLeaderboardEventFilter();
+      renderLeaderboard();
+    };
+    filter.appendChild(chip);
+  });
+}
+
+function renderLeaderboard(){
+  const list = document.getElementById('leaderboardList');
+  if(!selectedLeaderboardEvent){
+    list.innerHTML = '<p class="empty-note">No recorded swims yet.</p>';
+    return;
+  }
+
+  const bests = [];
+  Object.entries(allTimes).forEach(([id, entries]) => {
+    const swimmer = roster[id];
+    if(!swimmer) return;
+    const filtered = Object.values(entries || {}).filter(e => e.event === selectedLeaderboardEvent);
+    if(filtered.length === 0) return;
+    const best = filtered.reduce((min, e) => e.timeMs < min.timeMs ? e : min, filtered[0]);
+    bests.push({ name: `${swimmer.name} ${swimmer.surname}`, timeMs: best.timeMs, date: best.date });
+  });
+
+  bests.sort((a, b) => a.timeMs - b.timeMs);
+
+  if(bests.length === 0){
+    list.innerHTML = `<p class="empty-note">No swims recorded for ${selectedLeaderboardEvent} yet.</p>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  bests.forEach((b, i) => {
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
+    row.innerHTML = `
+      <div class="leaderboard-rank">${i + 1}</div>
+      <div class="leaderboard-name">${b.name}</div>
+      <div class="leaderboard-time">${formatTime(b.timeMs)}<span class="leaderboard-sub">${formatDate(b.date)}</span></div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+/* ---------- CSV export helper ---------- */
+function exportCsv(rows, filename){
+  if(rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csvLines = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => `"${String(r[h]).replace(/"/g, '""')}"`).join(','))
+  ];
+  const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /* ---------- Helpers ---------- */
