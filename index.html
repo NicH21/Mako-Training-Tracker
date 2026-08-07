@@ -76,6 +76,7 @@
     border-radius:8px;
   }
   .admin-link:hover{ color:var(--lane-rope); border-color:var(--lane-rope); }
+  .header-links{ display:flex; gap:10px; }
 
   .session-bar{
     max-width:1100px;
@@ -90,16 +91,44 @@
     border:1px solid rgba(78,203,141,0.35);
     border-radius:14px;
   }
+  .session-bar.paused{
+    background:rgba(255,193,78,0.08);
+    border-color:rgba(242,193,78,0.4);
+  }
   .session-bar.hidden{ display:none; }
   .session-bar .distance-label{
     font-family:var(--font-display);
     font-size:22px;
     color:var(--green-go);
   }
+  .session-bar.paused .distance-label{ color:var(--lane-rope); }
+  .clock-cluster{ display:flex; align-items:center; gap:14px; }
   .master-clock{
     font-family:var(--font-mono);
     font-size:28px;
     letter-spacing:.02em;
+  }
+  .btn-pause{
+    background:transparent;
+    border:1px solid var(--lane-rope);
+    color:var(--lane-rope);
+    padding:8px 16px;
+    border-radius:8px;
+    font-family:var(--font-body);
+    font-weight:600;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .btn-pause.is-paused{
+    background:var(--lane-rope);
+    color:var(--pool-deep);
+  }
+  .paused-tag{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
   }
 
   .empty-state{
@@ -147,20 +176,22 @@
     border:1px solid rgba(255,255,255,0.08);
     border-radius:16px;
     overflow:hidden;
-    cursor:pointer;
     -webkit-user-select:none; user-select:none;
-    transition:transform .06s ease;
-    min-height:150px;
     display:flex;
     flex-direction:column;
   }
-  .card:active{ transform:scale(.97); }
   .card .rope{
     height:4px;
     background:repeating-linear-gradient(90deg,var(--lane-rope-dim) 0 10px,transparent 10px 16px);
   }
+  .tap-area{
+    cursor:pointer;
+    transition:transform .06s ease;
+    flex:1;
+  }
+  .tap-area:active{ transform:scale(.97); }
   .card-body{
-    padding:16px 16px 14px;
+    padding:16px 16px 10px;
     flex:1;
     display:flex;
     flex-direction:column;
@@ -201,10 +232,38 @@
   .card.finished{
     background:linear-gradient(160deg, rgba(78,203,141,0.18), var(--pool-mid) 60%);
     border-color:var(--green-go);
-    cursor:default;
   }
+  .card.finished .tap-area{ cursor:default; }
   .card.finished .remaining{ color:var(--green-go); font-size:30px; }
   .card.finished .tap-hint{ color:var(--green-go); }
+
+  /* last-lap warning: slow red strobe on the card itself */
+  .card.last-lap{
+    animation: lastLapStrobe 1.6s ease-in-out infinite;
+  }
+  @keyframes lastLapStrobe{
+    0%, 100% { background:var(--pool-mid); border-color:rgba(255,107,94,0.25); }
+    50%      { background:rgba(255,107,94,0.22); border-color:var(--coral); }
+  }
+
+  .card-controls{
+    display:flex;
+    gap:6px;
+    padding:0 12px 12px;
+  }
+  .mini-btn{
+    flex:1;
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.12);
+    color:var(--slate);
+    font-family:var(--font-mono);
+    font-size:12px;
+    padding:7px 4px;
+    border-radius:7px;
+    cursor:pointer;
+  }
+  .mini-btn:hover{ color:var(--foam); border-color:rgba(255,255,255,0.3); }
+  .mini-btn.undo{ color:var(--coral); border-color:rgba(255,107,94,0.3); }
 
   footer{
     text-align:center;
@@ -228,7 +287,7 @@
     <p class="eyebrow">Squad Timer — Live</p>
     <h1>Poolside</h1>
   </div>
-  <div style="display:flex; gap:10px;">
+  <div class="header-links">
     <a class="admin-link" href="dashboard.html">Dashboard</a>
     <a class="admin-link" href="admin.html">Session setup →</a>
   </div>
@@ -236,7 +295,11 @@
 
 <section class="session-bar hidden" id="sessionBar">
   <div class="distance-label" id="sessionDistanceLabel">1500m</div>
-  <div class="master-clock" id="masterClock">00:00.00</div>
+  <div class="clock-cluster">
+    <span class="paused-tag" id="pausedTag" style="display:none;">Paused</span>
+    <div class="master-clock" id="masterClock">00:00.00</div>
+    <button class="btn-pause" id="pauseBtn">Pause</button>
+  </div>
 </section>
 
 <div class="empty-state" id="emptyState">
@@ -247,14 +310,9 @@
 
 <section class="grid" id="swimmerGrid"></section>
 
-<footer>Tap a name after every 2 laps (50m) &middot; times lock automatically at zero</footer>
+<footer>Tap a name after every 2 laps (50m) &middot; times lock automatically at zero &middot; card flashes red on the last lap</footer>
 
 <script>
-/* ============================================================
-   FIREBASE CONFIG — replace with your own project's config
-   (Firebase console → Project settings → Your apps → SDK config)
-   Use the SAME config on index.html and admin.html
-   ============================================================ */
 const firebaseConfig = {
   apiKey:            "AIzaSyBj4RW9UFi9EM-sMb-RVycurfDFZqpI1RM",
   authDomain:         "mako-training.firebaseapp.com",
@@ -273,14 +331,18 @@ const TAP_DECREMENT_M = 50; // one tap = 2 laps (25m pool)
 const sessionBar          = document.getElementById('sessionBar');
 const sessionDistanceLabel = document.getElementById('sessionDistanceLabel');
 const masterClock          = document.getElementById('masterClock');
+const pauseBtn              = document.getElementById('pauseBtn');
+const pausedTag             = document.getElementById('pausedTag');
 const emptyState           = document.getElementById('emptyState');
 const swimmerGrid          = document.getElementById('swimmerGrid');
 
 let clockInterval = null;
+let currentSession = null;
 
 /* ---------- Live session listener ---------- */
 db.ref('liveSession').on('value', snap => {
   const session = snap.val();
+  currentSession = session;
 
   if(!session || !session.active){
     sessionBar.classList.add('hidden');
@@ -292,10 +354,44 @@ db.ref('liveSession').on('value', snap => {
 
   emptyState.classList.add('hidden');
   sessionBar.classList.remove('hidden');
+  sessionBar.classList.toggle('paused', !!session.paused);
   sessionDistanceLabel.textContent = `${session.distance}m`;
-  startClock(session.startTime);
+  pauseBtn.textContent = session.paused ? 'Resume' : 'Pause';
+  pauseBtn.classList.toggle('is-paused', !!session.paused);
+  pausedTag.style.display = session.paused ? 'inline' : 'none';
+
+  if(session.paused){
+    stopClock();
+    const frozenElapsed = (session.pausedAt || Date.now()) - session.startTime;
+    masterClock.textContent = formatElapsed(frozenElapsed);
+  } else {
+    startClock(session.startTime);
+  }
+
   renderSwimmerGrid(session);
 });
+
+/* ---------- Pause / resume ---------- */
+pauseBtn.onclick = () => {
+  if(!currentSession) return;
+  const sessionRef = db.ref('liveSession');
+
+  if(currentSession.paused){
+    // resume: shift startTime forward by however long we were paused,
+    // so elapsed time correctly excludes the pause
+    const pauseDuration = Date.now() - currentSession.pausedAt;
+    sessionRef.update({
+      startTime: currentSession.startTime + pauseDuration,
+      paused: false,
+      pausedAt: null
+    });
+  } else {
+    sessionRef.update({
+      paused: true,
+      pausedAt: firebase.database.ServerValue.TIMESTAMP
+    });
+  }
+};
 
 /* ---------- Master clock ---------- */
 function startClock(startTime){
@@ -323,11 +419,16 @@ function pad(n){ return n.toString().padStart(2, '0'); }
 function renderSwimmerGrid(session){
   swimmerGrid.innerHTML = '';
   Object.entries(session.swimmers || {}).forEach(([id, s]) => {
+    const isLastLap = !s.finished && s.remaining <= TAP_DECREMENT_M;
+
     const card = document.createElement('div');
-    card.className = 'card' + (s.finished ? ' finished' : '');
+    card.className = 'card' + (s.finished ? ' finished' : '') + (isLastLap ? ' last-lap' : '');
 
     const rope = document.createElement('div');
     rope.className = 'rope';
+
+    const tapArea = document.createElement('div');
+    tapArea.className = 'tap-area';
 
     const body = document.createElement('div');
     body.className = 'card-body';
@@ -351,18 +452,45 @@ function renderSwimmerGrid(session){
 
     const hint = document.createElement('p');
     hint.className = 'tap-hint';
-    hint.textContent = s.finished ? 'Finished' : 'Tap after every 2 laps';
+    hint.textContent = s.finished ? 'Finished' : (isLastLap ? 'Last lap!' : 'Tap after every 2 laps');
 
     body.appendChild(nameEl);
     body.appendChild(subEl);
     body.appendChild(remainingEl);
     body.appendChild(hint);
-    card.appendChild(rope);
-    card.appendChild(body);
+    tapArea.appendChild(body);
 
     if(!s.finished){
-      card.onclick = () => tapSwimmer(id, session.startTime);
+      tapArea.onclick = () => tapSwimmer(id, session.startTime);
     }
+
+    card.appendChild(rope);
+    card.appendChild(tapArea);
+
+    // manual controls: undo, -50, +50
+    const controls = document.createElement('div');
+    controls.className = 'card-controls';
+
+    const undoBtn = document.createElement('button');
+    undoBtn.className = 'mini-btn undo';
+    undoBtn.textContent = 'Undo';
+    undoBtn.disabled = !s.previousRemaining && s.previousRemaining !== 0;
+    undoBtn.onclick = (e) => { e.stopPropagation(); undoLastTap(id); };
+
+    const minusBtn = document.createElement('button');
+    minusBtn.className = 'mini-btn';
+    minusBtn.textContent = '−50m';
+    minusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, -TAP_DECREMENT_M, session.startTime); };
+
+    const plusBtn = document.createElement('button');
+    plusBtn.className = 'mini-btn';
+    plusBtn.textContent = '+50m';
+    plusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, TAP_DECREMENT_M, session.startTime); };
+
+    controls.appendChild(undoBtn);
+    controls.appendChild(minusBtn);
+    controls.appendChild(plusBtn);
+    card.appendChild(controls);
 
     swimmerGrid.appendChild(card);
   });
@@ -374,6 +502,11 @@ function tapSwimmer(id, startTime){
 
   swimmerRef.transaction(current => {
     if(!current || current.finished) return current;
+
+    // remember state before this tap, to support one-level undo
+    current.previousRemaining = current.remaining;
+    current.previousFinished = current.finished || false;
+    current.previousFinishTimeMs = current.finishTimeMs || null;
 
     const newRemaining = current.remaining - TAP_DECREMENT_M;
 
@@ -388,10 +521,75 @@ function tapSwimmer(id, startTime){
   }, (error, committed, snap) => {
     if(committed){
       const val = snap.val();
-      if(val.finished){
+      if(val.finished && !val.previousFinished){
         saveToHistory(id, val);
       }
     }
+  });
+}
+
+/* ---------- Manual +/- adjustment ---------- */
+function adjustRemaining(id, deltaM, startTime){
+  const swimmerRef = db.ref(`liveSession/swimmers/${id}`);
+  swimmerRef.transaction(current => {
+    if(!current) return current;
+    current.previousRemaining = current.remaining;
+    current.previousFinished = current.finished || false;
+    current.previousFinishTimeMs = current.finishTimeMs || null;
+
+    let newRemaining = (current.finished ? 0 : current.remaining) + (current.finished ? 0 : 0); // no-op guard
+    newRemaining = (current.remaining || 0) - deltaM;
+    if(newRemaining < 0) newRemaining = 0;
+
+    current.remaining = newRemaining;
+    if(newRemaining <= 0 && !current.finished){
+      current.finished = true;
+      current.finishTimeMs = Date.now() - startTime;
+    } else if(newRemaining > 0 && current.finished){
+      // manual increase pulled a finished swimmer back into "still swimming"
+      current.finished = false;
+      current.finishTimeMs = null;
+    }
+    return current;
+  }, (error, committed, snap) => {
+    if(committed){
+      const val = snap.val();
+      if(val.finished && !val.previousFinished){
+        saveToHistory(id, val);
+      }
+    }
+  });
+}
+
+/* ---------- Undo last tap/adjustment ---------- */
+function undoLastTap(id){
+  const swimmerRef = db.ref(`liveSession/swimmers/${id}`);
+  swimmerRef.transaction(current => {
+    if(!current || current.previousRemaining === undefined) return current;
+
+    const wasFinished = current.finished;
+    current.remaining = current.previousRemaining;
+    current.finished = current.previousFinished;
+    current.finishTimeMs = current.previousFinishTimeMs;
+    current.previousRemaining = null;
+    current.previousFinished = null;
+    current.previousFinishTimeMs = null;
+    current._undoFlagRemoveHistory = wasFinished && !current.finished;
+    return current;
+  }, (error, committed, snap) => {
+    if(committed){
+      const val = snap.val();
+      if(val && val._undoFlagRemoveHistory){
+        removeLastHistoryEntry(id);
+        db.ref(`liveSession/swimmers/${id}/_undoFlagRemoveHistory`).remove();
+      }
+    }
+  });
+}
+
+function removeLastHistoryEntry(id){
+  db.ref(`swimmerTimes/${id}`).limitToLast(1).once('value', snap => {
+    snap.forEach(child => { child.ref.remove(); });
   });
 }
 
