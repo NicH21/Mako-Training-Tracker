@@ -281,6 +281,8 @@
     <section class="panel" id="individualPanel" style="display:none;">
       <h2 id="individualHeading">—</h2>
 
+      <div class="event-filter" id="individualEventFilter" style="margin-bottom:18px;"></div>
+
       <div class="stat-row">
         <div class="stat-card">
           <p class="stat-label">Personal best</p>
@@ -346,6 +348,7 @@ const CHART_TEXT_COLOR = '#5c7a8a';
 let roster = {};        // { id: {name, surname} }
 let allTimes = {};       // { id: { entryId: {date, event, timeMs} } }
 let selectedSwimmerId = null;
+let selectedIndividualEvent = null; // null = show all events for this swimmer
 let selectedEvent = null;
 let individualChart = null;
 let squadChart = null;
@@ -393,6 +396,7 @@ function renderSwimmerPicker(){
     chip.textContent = `${s.name} ${s.surname}`;
     chip.onclick = () => {
       selectedSwimmerId = id;
+      selectedIndividualEvent = null; // reset to "all events" for the newly chosen swimmer
       renderSwimmerPicker();
       renderIndividual(id);
     };
@@ -404,12 +408,13 @@ function renderSwimmerPicker(){
 function renderIndividual(id){
   const panel = document.getElementById('individualPanel');
   const swimmer = roster[id];
-  const entries = Object.values(allTimes[id] || {})
+  const allEntries = Object.values(allTimes[id] || {})
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  if(!swimmer || entries.length === 0){
+  if(!swimmer || allEntries.length === 0){
     panel.style.display = 'block';
     document.getElementById('individualHeading').textContent = swimmer ? `${swimmer.name} ${swimmer.surname}` : '—';
+    document.getElementById('individualEventFilter').innerHTML = '';
     document.getElementById('statBest').textContent = '—';
     document.getElementById('statBestSub').textContent = 'No recorded swims yet';
     document.getElementById('statLast').textContent = '—';
@@ -423,6 +428,27 @@ function renderIndividual(id){
 
   panel.style.display = 'block';
   document.getElementById('individualHeading').textContent = `${swimmer.name} ${swimmer.surname}`;
+
+  // Build the event filter from whatever distances this swimmer actually has —
+  // works for any race distance, no hardcoded list.
+  const swimmerEvents = [...new Set(allEntries.map(e => e.event))];
+  renderIndividualEventFilter(swimmerEvents);
+
+  const entries = selectedIndividualEvent
+    ? allEntries.filter(e => e.event === selectedIndividualEvent)
+    : allEntries;
+
+  if(entries.length === 0){
+    document.getElementById('statBest').textContent = '—';
+    document.getElementById('statBestSub').textContent = 'No swims recorded for this event yet';
+    document.getElementById('statLast').textContent = '—';
+    document.getElementById('statLastSub').textContent = '';
+    document.getElementById('statDelta').textContent = '—';
+    document.getElementById('statDeltaSub').textContent = '';
+    document.getElementById('historyTableBody').innerHTML = '';
+    if(individualChart){ individualChart.destroy(); individualChart = null; }
+    return;
+  }
 
   const best = entries.reduce((min, e) => e.timeMs < min.timeMs ? e : min, entries[0]);
   const last = entries[entries.length - 1];
@@ -522,6 +548,32 @@ function renderHistoryTable(entries){
     row.appendChild(timeCell);
     row.appendChild(deltaCell);
     body.appendChild(row);
+  });
+}
+
+function renderIndividualEventFilter(events){
+  const filter = document.getElementById('individualEventFilter');
+  filter.innerHTML = '';
+
+  const allChip = document.createElement('button');
+  allChip.className = 'event-chip' + (selectedIndividualEvent === null ? ' selected' : '');
+  allChip.textContent = 'All events';
+  allChip.onclick = () => {
+    selectedIndividualEvent = null;
+    renderIndividual(selectedSwimmerId);
+  };
+  filter.appendChild(allChip);
+
+  // events could be any distance the coach has ever entered (200m, 400m, 1500m, etc.)
+  events.forEach(ev => {
+    const chip = document.createElement('button');
+    chip.className = 'event-chip' + (ev === selectedIndividualEvent ? ' selected' : '');
+    chip.textContent = ev;
+    chip.onclick = () => {
+      selectedIndividualEvent = ev;
+      renderIndividual(selectedSwimmerId);
+    };
+    filter.appendChild(chip);
   });
 }
 
