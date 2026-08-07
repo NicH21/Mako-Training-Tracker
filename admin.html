@@ -76,6 +76,7 @@
     border-radius:8px;
   }
   .live-link:hover{ color:var(--lane-rope); border-color:var(--lane-rope); }
+  .header-links{ display:flex; gap:10px; }
 
   main{
     max-width:760px;
@@ -199,7 +200,6 @@
   }
   .selected-count strong{ color:var(--green-go); }
 
-  /* ── Active session notice ───────────────────────── */
   .active-notice{
     background:rgba(255,107,94,0.1);
     border:1px solid rgba(255,107,94,0.4);
@@ -231,6 +231,44 @@
     white-space:nowrap;
   }
 
+  /* ── Roster management list ─────────────────────── */
+  .roster-manage-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 0;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+  }
+  .roster-manage-row:last-child{ border-bottom:none; }
+  .roster-manage-name{
+    flex:1;
+    font-size:15px;
+  }
+  .roster-manage-row input[type=text]{
+    background:var(--pool-deep);
+    border:1px solid rgba(255,255,255,0.15);
+    color:var(--foam);
+    font-family:var(--font-body);
+    font-size:14px;
+    padding:7px 10px;
+    border-radius:7px;
+    width:120px;
+  }
+  .icon-btn{
+    background:transparent;
+    border:1px solid rgba(255,255,255,0.18);
+    color:var(--slate);
+    font-family:var(--font-body);
+    font-size:12px;
+    padding:6px 12px;
+    border-radius:7px;
+    cursor:pointer;
+  }
+  .icon-btn:hover{ color:var(--foam); border-color:rgba(255,255,255,0.35); }
+  .icon-btn.danger{ color:var(--coral); border-color:rgba(255,107,94,0.35); }
+  .icon-btn.danger:hover{ border-color:var(--coral); }
+  .icon-btn.save{ color:var(--green-go); border-color:rgba(78,203,141,0.4); }
+
   footer{
     text-align:center;
     color:var(--slate);
@@ -248,7 +286,7 @@
     <p class="eyebrow">Squad Timer — Setup</p>
     <h1>Session Setup</h1>
   </div>
-  <div style="display:flex; gap:10px;">
+  <div class="header-links">
     <a class="live-link" href="dashboard.html">Dashboard</a>
     <a class="live-link" href="index.html">← Back to live board</a>
   </div>
@@ -256,7 +294,6 @@
 
 <main>
 
-  <!-- shown only when a session is already running -->
   <div class="active-notice hidden" id="activeNotice">
     <p>A session is already <strong>live</strong> — end it before starting a new one.</p>
     <button class="btn-end" id="endSessionBtn">End current session</button>
@@ -292,6 +329,13 @@
   </section>
 
   <section class="panel">
+    <h2>Manage roster</h2>
+    <div id="rosterManageList">
+      <p class="roster-empty">No swimmers to manage yet.</p>
+    </div>
+  </section>
+
+  <section class="panel">
     <button class="btn-start" id="startBtn" disabled>Start session</button>
   </section>
 
@@ -300,10 +344,6 @@
 <footer>Session data syncs live to the poolside board the moment you press Start.</footer>
 
 <script>
-/* ============================================================
-   FIREBASE CONFIG — replace with your own project's config
-   Use the SAME config on index.html and admin.html
-   ============================================================ */
 const firebaseConfig = {
   apiKey:            "AIzaSyBj4RW9UFi9EM-sMb-RVycurfDFZqpI1RM",
   authDomain:         "mako-training.firebaseapp.com",
@@ -327,15 +367,18 @@ const selectedCountEl    = document.getElementById('selectedCount');
 const addSwimmerBtn      = document.getElementById('addSwimmerBtn');
 const newNameInput       = document.getElementById('newName');
 const newSurnameInput    = document.getElementById('newSurname');
+const rosterManageList   = document.getElementById('rosterManageList');
 
 let roster = {};
 let selectedIds = new Set();
 let sessionActive = false;
+let editingId = null; // which roster row is currently in rename mode
 
-/* ---------- Roster: load + render picker chips ---------- */
+/* ---------- Roster: load + render picker chips + manage list ---------- */
 db.ref('roster').on('value', snap => {
   roster = snap.val() || {};
   renderRosterPicker();
+  renderRosterManageList();
 });
 
 function renderRosterPicker(){
@@ -360,6 +403,76 @@ function renderRosterPicker(){
   selectedCountEl.innerHTML = selectedIds.size
     ? `<strong>${selectedIds.size}</strong> swimmer${selectedIds.size === 1 ? '' : 's'} selected`
     : '';
+}
+
+/* ---------- Manage roster: rename / delete ---------- */
+function renderRosterManageList(){
+  const ids = Object.keys(roster);
+  if(ids.length === 0){
+    rosterManageList.innerHTML = '<p class="roster-empty">No swimmers to manage yet.</p>';
+    return;
+  }
+
+  rosterManageList.innerHTML = '';
+  ids.forEach(id => {
+    const s = roster[id];
+    const row = document.createElement('div');
+    row.className = 'roster-manage-row';
+
+    if(editingId === id){
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.value = s.name;
+      const surnameInput = document.createElement('input');
+      surnameInput.type = 'text';
+      surnameInput.value = s.surname;
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'icon-btn save';
+      saveBtn.textContent = 'Save';
+      saveBtn.onclick = () => {
+        const newName = nameInput.value.trim();
+        const newSurname = surnameInput.value.trim();
+        if(!newName || !newSurname) return;
+        db.ref(`roster/${id}`).update({ name: newName, surname: newSurname });
+        editingId = null;
+      };
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'icon-btn';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.onclick = () => { editingId = null; renderRosterManageList(); };
+
+      row.appendChild(nameInput);
+      row.appendChild(surnameInput);
+      row.appendChild(saveBtn);
+      row.appendChild(cancelBtn);
+    } else {
+      const nameEl = document.createElement('div');
+      nameEl.className = 'roster-manage-name';
+      nameEl.textContent = `${s.name} ${s.surname}`;
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'icon-btn';
+      editBtn.textContent = 'Rename';
+      editBtn.onclick = () => { editingId = id; renderRosterManageList(); };
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'icon-btn danger';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.onclick = () => {
+        if(!confirm(`Remove ${s.name} ${s.surname} from the roster? Their recorded times stay in history.`)) return;
+        db.ref(`roster/${id}`).remove();
+        selectedIds.delete(id);
+      };
+
+      row.appendChild(nameEl);
+      row.appendChild(editBtn);
+      row.appendChild(deleteBtn);
+    }
+
+    rosterManageList.appendChild(row);
+  });
 }
 
 addSwimmerBtn.onclick = () => {
@@ -420,6 +533,8 @@ startBtn.onclick = () => {
     distance,
     startTime,
     active: true,
+    paused: false,
+    pausedAt: null,
     swimmers
   }).then(() => {
     window.location.href = 'index.html';
