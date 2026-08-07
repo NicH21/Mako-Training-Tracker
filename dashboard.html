@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Squad Timer</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<style>
+  :root{
+    --pool-deep:      #061826;
+    --pool-mid:       #0d2c3f;
+    --lane-rope:      #f2c14e;
+    --lane-rope-dim:  #a9893a;
+    --foam:           #eef6f5;
+    --slate:          #5c7a8a;
+    --coral:          #ff6b5e;
+    --green-go:       #4ecb8d;
+    --font-display:   'Oswald', sans-serif;
+    --font-body:      'Inter', sans-serif;
+    --font-mono:      'Space Mono', monospace;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0;
+    background:radial-gradient(ellipse at top, var(--pool-mid) 0%, var(--pool-deep) 70%);
+    color:var(--foam);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .lane-band{
+    height:6px; width:100%;
+    background:repeating-linear-gradient(90deg,var(--lane-rope) 0px,var(--lane-rope) 22px,var(--pool-deep) 22px,var(--pool-deep) 34px);
+    opacity:.55;
+  }
+
+  header{
+    padding:20px 20px 8px;
+    max-width:1100px;
+    margin:0 auto;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 4px;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:clamp(26px,5vw,36px);
+    margin:0;
+  }
+  .nav-links{ display:flex; gap:10px; }
+  .nav-link{
+    font-family:var(--font-body);
+    font-size:13px;
+    color:var(--slate);
+    text-decoration:none;
+    border:1px solid rgba(255,255,255,0.15);
+    padding:8px 14px;
+    border-radius:8px;
+  }
+  .nav-link:hover{ color:var(--lane-rope); border-color:var(--lane-rope); }
+
+  main{
+    max-width:1100px;
+    margin:0 auto;
+    padding:20px;
+  }
+
+  .tabs{
+    display:flex;
+    gap:8px;
+    margin-bottom:20px;
+    border-bottom:1px solid rgba(255,255,255,0.08);
+  }
+  .tab-btn{
+    background:transparent;
+    border:none;
+    color:var(--slate);
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:15px;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    padding:10px 4px 12px;
+    cursor:pointer;
+    border-bottom:2px solid transparent;
+  }
+  .tab-btn.active{ color:var(--lane-rope); border-bottom-color:var(--lane-rope); }
+
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  .panel{
+    background:rgba(255,255,255,0.03);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:14px;
+    padding:22px;
+    margin-bottom:18px;
+  }
+
+  .panel h2{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:16px;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 16px;
+  }
+
+  /* ── Swimmer picker (individual tab) ─────────────── */
+  .picker-row{
+    display:flex; flex-wrap:wrap; gap:8px;
+    margin-bottom:6px;
+  }
+  .picker-chip{
+    padding:9px 14px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,0.18);
+    background:transparent;
+    color:var(--foam);
+    font-family:var(--font-body);
+    font-size:14px;
+    cursor:pointer;
+  }
+  .picker-chip.selected{
+    background:var(--lane-rope);
+    border-color:var(--lane-rope);
+    color:var(--pool-deep);
+    font-weight:600;
+  }
+  .empty-note{
+    color:var(--slate);
+    font-size:13px;
+    font-style:italic;
+  }
+
+  /* ── Stat cards ───────────────────────────────────── */
+  .stat-row{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:12px;
+    margin-bottom:18px;
+  }
+  .stat-card{
+    background:var(--pool-deep);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px;
+    padding:14px 16px;
+  }
+  .stat-label{
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--slate);
+    margin:0 0 6px;
+  }
+  .stat-value{
+    font-family:var(--font-mono);
+    font-size:24px;
+    font-weight:700;
+    margin:0;
+  }
+  .stat-value.good{ color:var(--green-go); }
+  .stat-value.bad{ color:var(--coral); }
+  .stat-sub{
+    font-size:12px;
+    color:var(--slate);
+    margin:4px 0 0;
+  }
+
+  .chart-wrap{
+    position:relative;
+    height:320px;
+    margin-bottom:8px;
+  }
+
+  /* ── History table ────────────────────────────────── */
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:14px;
+  }
+  th{
+    text-align:left;
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--slate);
+    padding:8px 10px;
+    border-bottom:1px solid rgba(255,255,255,0.1);
+  }
+  td{
+    padding:10px;
+    border-bottom:1px solid rgba(255,255,255,0.05);
+    font-family:var(--font-mono);
+  }
+  td.delta-good{ color:var(--green-go); }
+  td.delta-bad{ color:var(--coral); }
+
+  /* ── Squad tab event filter ───────────────────────── */
+  .event-filter{
+    display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;
+  }
+  .event-chip{
+    padding:8px 14px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,0.18);
+    background:transparent;
+    color:var(--foam);
+    font-family:var(--font-mono);
+    font-size:13px;
+    cursor:pointer;
+  }
+  .event-chip.selected{
+    background:var(--lane-rope);
+    border-color:var(--lane-rope);
+    color:var(--pool-deep);
+    font-weight:700;
+  }
+
+  footer{
+    text-align:center;
+    color:var(--slate);
+    font-size:12px;
+    padding:10px 20px 30px;
+  }
+</style>
+</head>
+<body>
+
+<div class="lane-band"></div>
+
+<header>
+  <div>
+    <p class="eyebrow">Squad Timer — Dashboard</p>
+    <h1>Swim History</h1>
+  </div>
+  <div class="nav-links">
+    <a class="nav-link" href="index.html">Live board</a>
+    <a class="nav-link" href="admin.html">Session setup</a>
+  </div>
+</header>
+
+<main>
+
+  <div class="tabs">
+    <button class="tab-btn active" id="tabIndividual">Individual</button>
+    <button class="tab-btn" id="tabSquad">Whole squad</button>
+  </div>
+
+  <!-- ============ INDIVIDUAL VIEW ============ -->
+  <section class="view active" id="viewIndividual">
+    <section class="panel">
+      <h2>Choose a swimmer</h2>
+      <div class="picker-row" id="swimmerPicker">
+        <p class="empty-note">No swimmers on the roster yet.</p>
+      </div>
+    </section>
+
+    <section class="panel" id="individualPanel" style="display:none;">
+      <h2 id="individualHeading">—</h2>
+
+      <div class="stat-row">
+        <div class="stat-card">
+          <p class="stat-label">Personal best</p>
+          <p class="stat-value" id="statBest">—</p>
+          <p class="stat-sub" id="statBestSub">—</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-label">Last swim</p>
+          <p class="stat-value" id="statLast">—</p>
+          <p class="stat-sub" id="statLastSub">—</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-label">Change vs previous</p>
+          <p class="stat-value" id="statDelta">—</p>
+          <p class="stat-sub" id="statDeltaSub">—</p>
+        </div>
+      </div>
+
+      <div class="chart-wrap"><canvas id="individualChart"></canvas></div>
+
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Event</th><th>Time</th><th>Change</th></tr>
+        </thead>
+        <tbody id="historyTableBody"></tbody>
+      </table>
+    </section>
+  </section>
+
+  <!-- ============ SQUAD VIEW ============ -->
+  <section class="view" id="viewSquad">
+    <section class="panel">
+      <h2>Event</h2>
+      <div class="event-filter" id="eventFilter"></div>
+      <div class="chart-wrap"><canvas id="squadChart"></canvas></div>
+    </section>
+  </section>
+
+</main>
+
+<footer>Times pulled live from every recorded session.</footer>
+
+<script>
+/* ============================================================
+   FIREBASE CONFIG — same project as index.html and admin.html
+   ============================================================ */
+const firebaseConfig = {
+  apiKey:            "AIzaSyBj4RW9UFi9EM-sMb-RVycurfDFZqpI1RM",
+  authDomain:         "mako-training.firebaseapp.com",
+  databaseURL:        "https://mako-training-default-rtdb.firebaseio.com",
+  projectId:          "mako-training",
+  storageBucket:      "mako-training.firebasestorage.app",
+  messagingSenderId:  "665163331085",
+  appId:              "1:665163331085:web:159031c9073cbf3e91c744"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const CHART_GRID_COLOR = 'rgba(255,255,255,0.06)';
+const CHART_TEXT_COLOR = '#5c7a8a';
+
+let roster = {};        // { id: {name, surname} }
+let allTimes = {};       // { id: { entryId: {date, event, timeMs} } }
+let selectedSwimmerId = null;
+let selectedEvent = null;
+let individualChart = null;
+let squadChart = null;
+
+/* ---------- Tabs ---------- */
+document.getElementById('tabIndividual').onclick = () => switchTab('individual');
+document.getElementById('tabSquad').onclick = () => switchTab('squad');
+
+function switchTab(tab){
+  document.getElementById('tabIndividual').classList.toggle('active', tab === 'individual');
+  document.getElementById('tabSquad').classList.toggle('active', tab === 'squad');
+  document.getElementById('viewIndividual').classList.toggle('active', tab === 'individual');
+  document.getElementById('viewSquad').classList.toggle('active', tab === 'squad');
+  if(tab === 'squad') renderSquadChart();
+}
+
+/* ---------- Load roster ---------- */
+db.ref('roster').on('value', snap => {
+  roster = snap.val() || {};
+  renderSwimmerPicker();
+});
+
+/* ---------- Load all times ---------- */
+db.ref('swimmerTimes').on('value', snap => {
+  allTimes = snap.val() || {};
+  renderSwimmerPicker();
+  renderEventFilter();
+  if(selectedSwimmerId) renderIndividual(selectedSwimmerId);
+  renderSquadChart();
+});
+
+/* ---------- Swimmer picker ---------- */
+function renderSwimmerPicker(){
+  const picker = document.getElementById('swimmerPicker');
+  const ids = Object.keys(roster);
+  if(ids.length === 0){
+    picker.innerHTML = '<p class="empty-note">No swimmers on the roster yet.</p>';
+    return;
+  }
+  picker.innerHTML = '';
+  ids.forEach(id => {
+    const s = roster[id];
+    const chip = document.createElement('button');
+    chip.className = 'picker-chip' + (id === selectedSwimmerId ? ' selected' : '');
+    chip.textContent = `${s.name} ${s.surname}`;
+    chip.onclick = () => {
+      selectedSwimmerId = id;
+      renderSwimmerPicker();
+      renderIndividual(id);
+    };
+    picker.appendChild(chip);
+  });
+}
+
+/* ---------- Individual view ---------- */
+function renderIndividual(id){
+  const panel = document.getElementById('individualPanel');
+  const swimmer = roster[id];
+  const entries = Object.values(allTimes[id] || {})
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  if(!swimmer || entries.length === 0){
+    panel.style.display = 'block';
+    document.getElementById('individualHeading').textContent = swimmer ? `${swimmer.name} ${swimmer.surname}` : '—';
+    document.getElementById('statBest').textContent = '—';
+    document.getElementById('statBestSub').textContent = 'No recorded swims yet';
+    document.getElementById('statLast').textContent = '—';
+    document.getElementById('statLastSub').textContent = '';
+    document.getElementById('statDelta').textContent = '—';
+    document.getElementById('statDeltaSub').textContent = '';
+    document.getElementById('historyTableBody').innerHTML = '';
+    if(individualChart){ individualChart.destroy(); individualChart = null; }
+    return;
+  }
+
+  panel.style.display = 'block';
+  document.getElementById('individualHeading').textContent = `${swimmer.name} ${swimmer.surname}`;
+
+  const best = entries.reduce((min, e) => e.timeMs < min.timeMs ? e : min, entries[0]);
+  const last = entries[entries.length - 1];
+  const prev = entries.length > 1 ? entries[entries.length - 2] : null;
+
+  document.getElementById('statBest').textContent = formatTime(best.timeMs);
+  document.getElementById('statBestSub').textContent = `${best.event} · ${formatDate(best.date)}`;
+
+  document.getElementById('statLast').textContent = formatTime(last.timeMs);
+  document.getElementById('statLastSub').textContent = `${last.event} · ${formatDate(last.date)}`;
+
+  const deltaEl = document.getElementById('statDelta');
+  const deltaSubEl = document.getElementById('statDeltaSub');
+  if(prev){
+    const deltaMs = last.timeMs - prev.timeMs;
+    const faster = deltaMs < 0;
+    deltaEl.textContent = `${faster ? '−' : '+'}${formatTime(Math.abs(deltaMs))}`;
+    deltaEl.className = 'stat-value ' + (faster ? 'good' : 'bad');
+    deltaSubEl.textContent = faster ? 'Faster than previous swim' : 'Slower than previous swim';
+  } else {
+    deltaEl.textContent = '—';
+    deltaEl.className = 'stat-value';
+    deltaSubEl.textContent = 'Need a second swim to compare';
+  }
+
+  renderIndividualChart(entries);
+  renderHistoryTable(entries);
+}
+
+function renderIndividualChart(entries){
+  const ctx = document.getElementById('individualChart').getContext('2d');
+  const labels = entries.map(e => formatDate(e.date));
+  const data = entries.map(e => e.timeMs / 1000); // seconds for readable axis
+
+  if(individualChart) individualChart.destroy();
+
+  individualChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Time (s)',
+        data,
+        borderColor: '#f2c14e',
+        backgroundColor: 'rgba(242,193,78,0.12)',
+        pointBackgroundColor: '#f2c14e',
+        pointRadius: 4,
+        tension: 0.25,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: CHART_GRID_COLOR }, ticks: { color: CHART_TEXT_COLOR } },
+        y: {
+          reverse: true, // lower time = better, show improvement as upward trend
+          grid: { color: CHART_GRID_COLOR },
+          ticks: { color: CHART_TEXT_COLOR, callback: v => formatTime(v * 1000) }
+        }
+      }
+    }
+  });
+}
+
+function renderHistoryTable(entries){
+  const body = document.getElementById('historyTableBody');
+  body.innerHTML = '';
+  const sorted = [...entries].reverse(); // most recent first
+  sorted.forEach((e, i) => {
+    const prevEntry = sorted[i + 1]; // older entry, since reversed
+    const row = document.createElement('tr');
+
+    const dateCell = document.createElement('td');
+    dateCell.textContent = formatDate(e.date);
+
+    const eventCell = document.createElement('td');
+    eventCell.textContent = e.event;
+
+    const timeCell = document.createElement('td');
+    timeCell.textContent = formatTime(e.timeMs);
+
+    const deltaCell = document.createElement('td');
+    if(prevEntry){
+      const deltaMs = e.timeMs - prevEntry.timeMs;
+      const faster = deltaMs < 0;
+      deltaCell.textContent = `${faster ? '−' : '+'}${formatTime(Math.abs(deltaMs))}`;
+      deltaCell.className = faster ? 'delta-good' : 'delta-bad';
+    } else {
+      deltaCell.textContent = '—';
+    }
+
+    row.appendChild(dateCell);
+    row.appendChild(eventCell);
+    row.appendChild(timeCell);
+    row.appendChild(deltaCell);
+    body.appendChild(row);
+  });
+}
+
+/* ---------- Squad view ---------- */
+function renderEventFilter(){
+  const events = new Set();
+  Object.values(allTimes).forEach(swimmerEntries => {
+    Object.values(swimmerEntries || {}).forEach(e => events.add(e.event));
+  });
+
+  const filter = document.getElementById('eventFilter');
+  filter.innerHTML = '';
+
+  if(events.size === 0){
+    filter.innerHTML = '<p class="empty-note">No recorded swims yet.</p>';
+    return;
+  }
+
+  if(!selectedEvent || !events.has(selectedEvent)){
+    selectedEvent = [...events][0];
+  }
+
+  events.forEach(ev => {
+    const chip = document.createElement('button');
+    chip.className = 'event-chip' + (ev === selectedEvent ? ' selected' : '');
+    chip.textContent = ev;
+    chip.onclick = () => {
+      selectedEvent = ev;
+      renderEventFilter();
+      renderSquadChart();
+    };
+    filter.appendChild(chip);
+  });
+}
+
+function renderSquadChart(){
+  if(!selectedEvent) return;
+
+  const datasets = [];
+  const colors = ['#f2c14e', '#4ecb8d', '#ff6b5e', '#7fb3d5', '#c98bdb', '#e0e07a', '#8adbc4', '#e39a6f'];
+  let colorIdx = 0;
+  let allLabels = new Set();
+
+  Object.entries(allTimes).forEach(([id, entries]) => {
+    const swimmer = roster[id];
+    if(!swimmer) return;
+    const filtered = Object.values(entries || {})
+      .filter(e => e.event === selectedEvent)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    if(filtered.length === 0) return;
+
+    filtered.forEach(e => allLabels.add(formatDate(e.date)));
+
+    datasets.push({
+      label: `${swimmer.name} ${swimmer.surname}`,
+      data: filtered.map(e => ({ x: formatDate(e.date), y: e.timeMs / 1000 })),
+      borderColor: colors[colorIdx % colors.length],
+      backgroundColor: colors[colorIdx % colors.length],
+      pointRadius: 4,
+      tension: 0.25,
+      fill: false
+    });
+    colorIdx++;
+  });
+
+  const ctx = document.getElementById('squadChart').getContext('2d');
+  if(squadChart) squadChart.destroy();
+
+  if(datasets.length === 0){
+    return;
+  }
+
+  squadChart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      parsing: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: CHART_TEXT_COLOR, boxWidth: 12, font: { size: 11 } } }
+      },
+      scales: {
+        x: { type: 'category', labels: [...allLabels], grid: { color: CHART_GRID_COLOR }, ticks: { color: CHART_TEXT_COLOR } },
+        y: {
+          reverse: true,
+          grid: { color: CHART_GRID_COLOR },
+          ticks: { color: CHART_TEXT_COLOR, callback: v => formatTime(v * 1000) }
+        }
+      }
+    }
+  });
+}
+
+/* ---------- Helpers ---------- */
+function formatTime(ms){
+  const totalSec = Math.floor(ms / 1000);
+  const centis = Math.floor((ms % 1000) / 10);
+  const sec = totalSec % 60;
+  const min = Math.floor(totalSec / 60);
+  return `${pad(min)}:${pad(sec)}.${pad(centis)}`;
+}
+function formatDate(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short' });
+}
+function pad(n){ return n.toString().padStart(2, '0'); }
+</script>
+</body>
+</html>
