@@ -237,6 +237,15 @@
   .card.finished .remaining{ color:var(--green-go); font-size:30px; }
   .card.finished .tap-hint{ color:var(--green-go); }
 
+  .card.on-cooldown .tap-area{
+    cursor:not-allowed;
+    opacity:.55;
+  }
+  .card.on-cooldown .tap-hint{
+    color:var(--slate);
+    font-weight:600;
+  }
+
   /* last-lap warning: slow red strobe on the card itself */
   .card.last-lap{
     animation: lastLapStrobe 1.6s ease-in-out infinite;
@@ -289,6 +298,7 @@
   </div>
   <div class="header-links">
     <a class="admin-link" href="dashboard.html">Dashboard</a>
+    <a class="admin-link" href="settings.html">Settings</a>
     <a class="admin-link" href="admin.html">Session setup →</a>
   </div>
 </header>
@@ -337,7 +347,17 @@ const emptyState           = document.getElementById('emptyState');
 const swimmerGrid          = document.getElementById('swimmerGrid');
 
 let clockInterval = null;
+let cooldownInterval = null;
 let currentSession = null;
+
+const COOLDOWN_MS = 20000; // 20s lockout on a swimmer's card after each tap, shared across every device
+let cooldownEnabled = true; // default on; overridden by /settings/cooldownEnabled
+
+db.ref('settings/cooldownEnabled').on('value', snap => {
+  const val = snap.val();
+  cooldownEnabled = (val === null) ? true : !!val;
+  if(currentSession) renderSwimmerGrid(currentSession);
+});
 
 /* ---------- Live session listener ---------- */
 db.ref('liveSession').on('value', snap => {
@@ -349,6 +369,7 @@ db.ref('liveSession').on('value', snap => {
     emptyState.classList.remove('hidden');
     swimmerGrid.innerHTML = '';
     stopClock();
+    stopCooldownTicker();
     return;
   }
 
@@ -368,8 +389,20 @@ db.ref('liveSession').on('value', snap => {
     startClock(session.startTime);
   }
 
+  startCooldownTicker();
   renderSwimmerGrid(session);
 });
+
+function startCooldownTicker(){
+  if(cooldownInterval) return;
+  cooldownInterval = setInterval(() => {
+    if(currentSession) renderSwimmerGrid(currentSession);
+  }, 1000);
+}
+function stopCooldownTicker(){
+  if(cooldownInterval) clearInterval(cooldownInterval);
+  cooldownInterval = null;
+}
 
 /* ---------- Pause / resume ---------- */
 pauseBtn.onclick = () => {
@@ -420,9 +453,14 @@ function renderSwimmerGrid(session){
   swimmerGrid.innerHTML = '';
   Object.entries(session.swimmers || {}).forEach(([id, s]) => {
     const isLastLap = !s.finished && s.remaining <= TAP_DECREMENT_M;
+    const remainingCooldownMs = (s.cooldownUntil || 0) - Date.now();
+    const inCooldown = cooldownEnabled && !s.finished && remainingCooldownMs > 0;
 
     const card = document.createElement('div');
-    card.className = 'card' + (s.finished ? ' finished' : '') + (isLastLap ? ' last-lap' : '');
+    card.className = 'card'
+      + (s.finished ? ' finished' : '')
+      + (isLastLap ? ' last-lap' : '')
+      + (inCooldown ? ' on-cooldown' : '');
 
     const rope = document.createElement('div');
     rope.className = 'rope';
@@ -452,7 +490,15 @@ function renderSwimmerGrid(session){
 
     const hint = document.createElement('p');
     hint.className = 'tap-hint';
-    hint.textContent = s.finished ? 'Finished' : (isLastLap ? 'Last lap!' : 'Tap after every 2 laps');
+    if(s.finished){
+      hint.textContent = 'Finished';
+    } else if(inCooldown){
+      hint.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
+    } else if(isLastLap){
+      hint.textContent = 'Last lap!';
+    } else {
+      hint.textContent = 'Tap after every 2 laps';
+    }
 
     body.appendChild(nameEl);
     body.appendChild(subEl);
@@ -460,7 +506,7 @@ function renderSwimmerGrid(session){
     body.appendChild(hint);
     tapArea.appendChild(body);
 
-    if(!s.finished){
+    if(!s.finished && !inCooldown){
       tapArea.onclick = () => tapSwimmer(id, session.startTime);
     }
 
@@ -502,6 +548,7 @@ function tapSwimmer(id, startTime){
 
   swimmerRef.transaction(current => {
     if(!current || current.finished) return current;
+    if(current.cooldownUntil && current.cooldownUntil > Date.now()) return current; // already locked on another device
 
     // remember state before this tap, to support one-level undo
     current.previousRemaining = current.remaining;
@@ -517,6 +564,8 @@ function tapSwimmer(id, startTime){
     } else {
       current.remaining = newRemaining;
     }
+
+    current.cooldownUntil = cooldownEnabled ? Date.now() + COOLDOWN_MS : null;
     return current;
   }, (error, committed, snap) => {
     if(committed){
@@ -574,6 +623,7 @@ function undoLastTap(id){
     current.previousRemaining = null;
     current.previousFinished = null;
     current.previousFinishTimeMs = null;
+    current.cooldownUntil = null; // unlock the card for everyone immediately
     current._undoFlagRemoveHistory = wasFinished && !current.finished;
     return current;
   }, (error, committed, snap) => {
