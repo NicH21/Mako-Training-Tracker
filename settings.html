@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings — Squad Timer</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --pool-deep:      #061826;
+    --pool-mid:       #0d2c3f;
+    --lane-rope:      #f2c14e;
+    --lane-rope-dim:  #a9893a;
+    --foam:           #eef6f5;
+    --slate:          #5c7a8a;
+    --coral:          #ff6b5e;
+    --green-go:       #4ecb8d;
+    --font-display:   'Oswald', sans-serif;
+    --font-body:      'Inter', sans-serif;
+    --font-mono:      'Space Mono', monospace;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0;
+    background:radial-gradient(ellipse at top, var(--pool-mid) 0%, var(--pool-deep) 70%);
+    color:var(--foam);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .lane-band{
+    height:6px; width:100%;
+    background:repeating-linear-gradient(90deg,var(--lane-rope) 0px,var(--lane-rope) 22px,var(--pool-deep) 22px,var(--pool-deep) 34px);
+    opacity:.55;
+  }
+
+  header{
+    padding:20px 20px 8px;
+    max-width:700px;
+    margin:0 auto;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 4px;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:clamp(26px,5vw,36px);
+    margin:0;
+  }
+  .nav-links{ display:flex; gap:10px; }
+  .nav-link{
+    font-family:var(--font-body);
+    font-size:13px;
+    color:var(--slate);
+    text-decoration:none;
+    border:1px solid rgba(255,255,255,0.15);
+    padding:8px 14px;
+    border-radius:8px;
+  }
+  .nav-link:hover{ color:var(--lane-rope); border-color:var(--lane-rope); }
+
+  main{
+    max-width:700px;
+    margin:0 auto;
+    padding:20px;
+  }
+
+  .panel{
+    background:rgba(255,255,255,0.03);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:14px;
+    padding:22px;
+    margin-bottom:18px;
+  }
+  .panel h2{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:16px;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 6px;
+  }
+
+  .setting-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+    padding:16px 0;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+  }
+  .setting-row:last-child{ border-bottom:none; }
+  .setting-info{ flex:1; }
+  .setting-title{
+    font-size:15px;
+    font-weight:600;
+    margin:0 0 4px;
+  }
+  .setting-desc{
+    font-size:13px;
+    color:var(--slate);
+    margin:0;
+    line-height:1.5;
+  }
+
+  /* toggle switch */
+  .toggle{
+    position:relative;
+    width:52px;
+    height:30px;
+    flex-shrink:0;
+  }
+  .toggle input{
+    opacity:0;
+    width:0;
+    height:0;
+  }
+  .toggle-track{
+    position:absolute;
+    inset:0;
+    background:rgba(255,255,255,0.12);
+    border:1px solid rgba(255,255,255,0.2);
+    border-radius:999px;
+    cursor:pointer;
+    transition:background .15s ease, border-color .15s ease;
+  }
+  .toggle-track::before{
+    content:"";
+    position:absolute;
+    height:22px;
+    width:22px;
+    left:3px;
+    top:3px;
+    background:var(--foam);
+    border-radius:50%;
+    transition:transform .15s ease;
+  }
+  .toggle input:checked + .toggle-track{
+    background:var(--lane-rope);
+    border-color:var(--lane-rope);
+  }
+  .toggle input:checked + .toggle-track::before{
+    transform:translateX(22px);
+    background:var(--pool-deep);
+  }
+
+  .save-note{
+    font-size:12px;
+    color:var(--green-go);
+    margin-top:14px;
+    opacity:0;
+    transition:opacity .3s ease;
+  }
+  .save-note.show{ opacity:1; }
+
+  footer{
+    text-align:center;
+    color:var(--slate);
+    font-size:12px;
+    padding:10px 20px 30px;
+  }
+</style>
+</head>
+<body>
+
+<div class="lane-band"></div>
+
+<header>
+  <div>
+    <p class="eyebrow">Squad Timer — Settings</p>
+    <h1>Settings</h1>
+  </div>
+  <div class="nav-links">
+    <a class="nav-link" href="index.html">Live board</a>
+    <a class="nav-link" href="admin.html">Session setup</a>
+    <a class="nav-link" href="dashboard.html">Dashboard</a>
+  </div>
+</header>
+
+<main>
+
+  <section class="panel">
+    <h2>Live board behaviour</h2>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <p class="setting-title">Tap cooldown</p>
+        <p class="setting-desc">
+          After a swimmer's card is tapped, lock it for 20 seconds on every device.
+          Helps prevent accidental double-taps and gives the coach's eyes a breather.
+        </p>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="cooldownToggle">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
+    <p class="save-note" id="saveNote">Saved — applies live on the board.</p>
+  </section>
+
+</main>
+
+<footer>Settings apply instantly across every device viewing the live board.</footer>
+
+<script>
+const firebaseConfig = {
+  apiKey:            "AIzaSyBj4RW9UFi9EM-sMb-RVycurfDFZqpI1RM",
+  authDomain:         "mako-training.firebaseapp.com",
+  databaseURL:        "https://mako-training-default-rtdb.firebaseio.com",
+  projectId:          "mako-training",
+  storageBucket:      "mako-training.firebasestorage.app",
+  messagingSenderId:  "665163331085",
+  appId:              "1:665163331085:web:159031c9073cbf3e91c744"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const cooldownToggle = document.getElementById('cooldownToggle');
+const saveNote = document.getElementById('saveNote');
+
+let loadedFromFirebase = false;
+
+db.ref('settings/cooldownEnabled').on('value', snap => {
+  const enabled = snap.val();
+  // default to true (cooldown ON) if never set before
+  cooldownToggle.checked = (enabled === null) ? true : !!enabled;
+  loadedFromFirebase = true;
+});
+
+cooldownToggle.addEventListener('change', () => {
+  if(!loadedFromFirebase) return;
+  db.ref('settings/cooldownEnabled').set(cooldownToggle.checked).then(() => {
+    saveNote.classList.add('show');
+    setTimeout(() => saveNote.classList.remove('show'), 1800);
+  });
+});
+</script>
+</body>
+</html>
