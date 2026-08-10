@@ -120,7 +120,7 @@
     padding:10px 12px;
     border-radius:8px;
     width:100%;
-    max-width:220px;
+    max-width:280px;
   }
   .field input:focus{ outline:2px solid var(--lane-rope); outline-offset:1px; }
 
@@ -231,7 +231,6 @@
     white-space:nowrap;
   }
 
-  /* ── Roster management list ─────────────────────── */
   .roster-manage-row{
     display:flex;
     align-items:center;
@@ -269,6 +268,20 @@
   .icon-btn.danger:hover{ border-color:var(--coral); }
   .icon-btn.save{ color:var(--green-go); border-color:rgba(78,203,141,0.4); }
 
+  .slot-badge{
+    display:inline-block;
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    background:rgba(242,193,78,0.1);
+    border:1px solid rgba(242,193,78,0.3);
+    padding:4px 10px;
+    border-radius:999px;
+    margin-bottom:10px;
+  }
+
   footer{
     text-align:center;
     color:var(--slate);
@@ -287,21 +300,28 @@
     <h1>Session Setup</h1>
   </div>
   <div class="header-links">
+    <a class="live-link" href="sessions.html">All sessions</a>
     <a class="live-link" href="dashboard.html">Dashboard</a>
     <a class="live-link" href="settings.html">Settings</a>
-    <a class="live-link" href="index.html">← Back to live board</a>
   </div>
 </header>
 
 <main>
 
+  <span class="slot-badge" id="slotBadge">Session —</span>
+
   <div class="active-notice hidden" id="activeNotice">
-    <p>A session is already <strong>live</strong> — end it before starting a new one.</p>
+    <p>This slot already has a session <strong>live</strong> — end it before starting a new one.</p>
     <button class="btn-end" id="endSessionBtn">End current session</button>
   </div>
 
   <section class="panel" id="setupPanel">
     <h2>New session</h2>
+
+    <div class="field">
+      <label for="labelInput">Session label (optional)</label>
+      <input type="text" id="labelInput" placeholder="e.g. Sprint squad, Coach Sarah">
+    </div>
 
     <div class="field">
       <label for="distanceInput">Distance (m)</label>
@@ -358,9 +378,22 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+const NUM_SLOTS = 5;
+
+/* ---------- Resolve which slot this page is for ---------- */
+const urlParams = new URLSearchParams(window.location.search);
+let slot = parseInt(urlParams.get('slot'), 10);
+if(!slot || slot < 1 || slot > NUM_SLOTS){
+  window.location.href = 'sessions.html';
+}
+document.getElementById('slotBadge').textContent = `Session ${slot}`;
+
+const sessionRef = db.ref(`liveSessions/${slot}`);
+
 const setupPanel        = document.getElementById('setupPanel');
 const activeNotice       = document.getElementById('activeNotice');
 const endSessionBtn      = document.getElementById('endSessionBtn');
+const labelInput         = document.getElementById('labelInput');
 const distanceInput      = document.getElementById('distanceInput');
 const startBtn           = document.getElementById('startBtn');
 const rosterPicker       = document.getElementById('rosterPicker');
@@ -373,9 +406,9 @@ const rosterManageList   = document.getElementById('rosterManageList');
 let roster = {};
 let selectedIds = new Set();
 let sessionActive = false;
-let editingId = null; // which roster row is currently in rename mode
+let editingId = null;
 
-/* ---------- Roster: load + render picker chips + manage list ---------- */
+/* ---------- Roster: shared across every slot ---------- */
 db.ref('roster').on('value', snap => {
   roster = snap.val() || {};
   renderRosterPicker();
@@ -406,7 +439,6 @@ function renderRosterPicker(){
     : '';
 }
 
-/* ---------- Manage roster: rename / delete ---------- */
 function renderRosterManageList(){
   const ids = Object.keys(roster);
   if(ids.length === 0){
@@ -492,8 +524,8 @@ function validateStart(){
 }
 distanceInput.addEventListener('input', validateStart);
 
-/* ---------- Watch for an already-active session ---------- */
-db.ref('liveSession').on('value', snap => {
+/* ---------- Watch this slot for an already-active session ---------- */
+sessionRef.on('value', snap => {
   const session = snap.val();
   sessionActive = !!(session && session.active);
 
@@ -510,13 +542,14 @@ db.ref('liveSession').on('value', snap => {
 });
 
 endSessionBtn.onclick = () => {
-  if(!confirm('End the current session? The live board will clear for everyone.')) return;
-  db.ref('liveSession').remove();
+  if(!confirm('End the current session on this slot? The live board will clear for everyone viewing it.')) return;
+  sessionRef.remove();
 };
 
 /* ---------- Start session ---------- */
 startBtn.onclick = () => {
   const distance = parseInt(distanceInput.value, 10);
+  const label = labelInput.value.trim();
   const startTime = firebase.database.ServerValue.TIMESTAMP;
 
   const swimmers = {};
@@ -530,15 +563,16 @@ startBtn.onclick = () => {
     };
   });
 
-  db.ref('liveSession').set({
+  sessionRef.set({
     distance,
+    label: label || null,
     startTime,
     active: true,
     paused: false,
     pausedAt: null,
     swimmers
   }).then(() => {
-    window.location.href = 'index.html';
+    window.location.href = `index.html?slot=${slot}`;
   });
 };
 
