@@ -102,6 +102,11 @@
     color:var(--green-go);
   }
   .session-bar.paused .distance-label{ color:var(--lane-rope); }
+  .session-label-sub{
+    font-size:12px;
+    color:var(--slate);
+    margin-top:2px;
+  }
   .clock-cluster{ display:flex; align-items:center; gap:14px; }
   .master-clock{
     font-family:var(--font-mono);
@@ -246,7 +251,6 @@
     font-weight:600;
   }
 
-  /* last-lap warning: slow red strobe on the card itself */
   .card.last-lap{
     animation: lastLapStrobe 1.6s ease-in-out infinite;
   }
@@ -293,18 +297,22 @@
 
 <header>
   <div>
-    <p class="eyebrow">Squad Timer — Live</p>
-    <h1>Poolside</h1>
+    <p class="eyebrow" id="eyebrowLabel">Squad Timer — Live</p>
+    <h1 id="pageHeading">Poolside</h1>
   </div>
   <div class="header-links">
+    <a class="admin-link" href="sessions.html">All sessions</a>
     <a class="admin-link" href="dashboard.html">Dashboard</a>
     <a class="admin-link" href="settings.html">Settings</a>
-    <a class="admin-link" href="admin.html">Session setup →</a>
+    <a class="admin-link" id="setupLink" href="admin.html">Session setup →</a>
   </div>
 </header>
 
 <section class="session-bar hidden" id="sessionBar">
-  <div class="distance-label" id="sessionDistanceLabel">1500m</div>
+  <div>
+    <div class="distance-label" id="sessionDistanceLabel">1500m</div>
+    <div class="session-label-sub" id="sessionLabelSub"></div>
+  </div>
   <div class="clock-cluster">
     <span class="paused-tag" id="pausedTag" style="display:none;">Paused</span>
     <div class="master-clock" id="masterClock">00:00.00</div>
@@ -313,9 +321,9 @@
 </section>
 
 <div class="empty-state" id="emptyState">
-  <p class="big">No session running</p>
+  <p class="big">No session running on this slot</p>
   <p class="small">Head to session setup to enter a distance, pick swimmers, and start the clock.</p>
-  <a href="admin.html">Set up a session</a>
+  <a id="emptyStateLink" href="admin.html">Set up a session</a>
 </div>
 
 <section class="grid" id="swimmerGrid"></section>
@@ -336,10 +344,24 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+const NUM_SLOTS = 5;
 const TAP_DECREMENT_M = 50; // one tap = 2 laps (25m pool)
+
+/* ---------- Resolve which slot this page is for ---------- */
+const urlParams = new URLSearchParams(window.location.search);
+let slot = parseInt(urlParams.get('slot'), 10);
+if(!slot || slot < 1 || slot > NUM_SLOTS){
+  window.location.href = 'sessions.html';
+}
+document.getElementById('eyebrowLabel').textContent = `Squad Timer — Live — Session ${slot}`;
+document.getElementById('setupLink').href = `admin.html?slot=${slot}`;
+document.getElementById('emptyStateLink').href = `admin.html?slot=${slot}`;
+
+const sessionRef = db.ref(`liveSessions/${slot}`);
 
 const sessionBar          = document.getElementById('sessionBar');
 const sessionDistanceLabel = document.getElementById('sessionDistanceLabel');
+const sessionLabelSub      = document.getElementById('sessionLabelSub');
 const masterClock          = document.getElementById('masterClock');
 const pauseBtn              = document.getElementById('pauseBtn');
 const pausedTag             = document.getElementById('pausedTag');
@@ -359,8 +381,8 @@ db.ref('settings/cooldownEnabled').on('value', snap => {
   if(currentSession) renderSwimmerGrid(currentSession);
 });
 
-/* ---------- Live session listener ---------- */
-db.ref('liveSession').on('value', snap => {
+/* ---------- Live session listener (scoped to this slot) ---------- */
+sessionRef.on('value', snap => {
   const session = snap.val();
   currentSession = session;
 
@@ -377,6 +399,8 @@ db.ref('liveSession').on('value', snap => {
   sessionBar.classList.remove('hidden');
   sessionBar.classList.toggle('paused', !!session.paused);
   sessionDistanceLabel.textContent = `${session.distance}m`;
+  sessionLabelSub.textContent = session.label ? session.label : `Session ${slot}`;
+  document.getElementById('pageHeading').textContent = session.label ? session.label : `Poolside — Session ${slot}`;
   pauseBtn.textContent = session.paused ? 'Resume' : 'Pause';
   pauseBtn.classList.toggle('is-paused', !!session.paused);
   pausedTag.style.display = session.paused ? 'inline' : 'none';
@@ -407,11 +431,8 @@ function stopCooldownTicker(){
 /* ---------- Pause / resume ---------- */
 pauseBtn.onclick = () => {
   if(!currentSession) return;
-  const sessionRef = db.ref('liveSession');
 
   if(currentSession.paused){
-    // resume: shift startTime forward by however long we were paused,
-    // so elapsed time correctly excludes the pause
     const pauseDuration = Date.now() - currentSession.pausedAt;
     sessionRef.update({
       startTime: currentSession.startTime + pauseDuration,
@@ -452,8 +473,6 @@ function pad(n){ return n.toString().padStart(2, '0'); }
 function renderSwimmerGrid(session){
   swimmerGrid.innerHTML = '';
 
-  // Compute state for every swimmer first, then sort so tappable cards
-  // bubble to the top — coach's eyes should land on who's actionable right now.
   const entries = Object.entries(session.swimmers || {}).map(([id, s]) => {
     const isLastLap = !s.finished && s.remaining <= TAP_DECREMENT_M;
     const remainingCooldownMs = (s.cooldownUntil || 0) - Date.now();
@@ -462,7 +481,7 @@ function renderSwimmerGrid(session){
     let sortRank;
     if(s.finished) sortRank = 2;
     else if(inCooldown) sortRank = 1;
-    else sortRank = 0; // available to tap — bubbles to top
+    else sortRank = 0;
 
     return { id, s, isLastLap, inCooldown, remainingCooldownMs, sortRank };
   });
@@ -527,7 +546,6 @@ function renderSwimmerGrid(session){
     card.appendChild(rope);
     card.appendChild(tapArea);
 
-    // manual controls: undo, -50, +50
     const controls = document.createElement('div');
     controls.className = 'card-controls';
 
@@ -558,13 +576,12 @@ function renderSwimmerGrid(session){
 
 /* ---------- Tap handler (atomic transaction) ---------- */
 function tapSwimmer(id, startTime){
-  const swimmerRef = db.ref(`liveSession/swimmers/${id}`);
+  const swimmerRef = db.ref(`liveSessions/${slot}/swimmers/${id}`);
 
   swimmerRef.transaction(current => {
     if(!current || current.finished) return current;
-    if(current.cooldownUntil && current.cooldownUntil > Date.now()) return current; // already locked on another device
+    if(current.cooldownUntil && current.cooldownUntil > Date.now()) return current;
 
-    // remember state before this tap, to support one-level undo
     current.previousRemaining = current.remaining;
     current.previousFinished = current.finished || false;
     current.previousFinishTimeMs = current.finishTimeMs || null;
@@ -593,15 +610,14 @@ function tapSwimmer(id, startTime){
 
 /* ---------- Manual +/- adjustment ---------- */
 function adjustRemaining(id, deltaM, startTime){
-  const swimmerRef = db.ref(`liveSession/swimmers/${id}`);
+  const swimmerRef = db.ref(`liveSessions/${slot}/swimmers/${id}`);
   swimmerRef.transaction(current => {
     if(!current) return current;
     current.previousRemaining = current.remaining;
     current.previousFinished = current.finished || false;
     current.previousFinishTimeMs = current.finishTimeMs || null;
 
-    let newRemaining = (current.finished ? 0 : current.remaining) + (current.finished ? 0 : 0); // no-op guard
-    newRemaining = (current.remaining || 0) - deltaM;
+    let newRemaining = (current.remaining || 0) - deltaM;
     if(newRemaining < 0) newRemaining = 0;
 
     current.remaining = newRemaining;
@@ -609,7 +625,6 @@ function adjustRemaining(id, deltaM, startTime){
       current.finished = true;
       current.finishTimeMs = Date.now() - startTime;
     } else if(newRemaining > 0 && current.finished){
-      // manual increase pulled a finished swimmer back into "still swimming"
       current.finished = false;
       current.finishTimeMs = null;
     }
@@ -626,7 +641,7 @@ function adjustRemaining(id, deltaM, startTime){
 
 /* ---------- Undo last tap/adjustment ---------- */
 function undoLastTap(id){
-  const swimmerRef = db.ref(`liveSession/swimmers/${id}`);
+  const swimmerRef = db.ref(`liveSessions/${slot}/swimmers/${id}`);
   swimmerRef.transaction(current => {
     if(!current || current.previousRemaining === undefined) return current;
 
@@ -637,7 +652,7 @@ function undoLastTap(id){
     current.previousRemaining = null;
     current.previousFinished = null;
     current.previousFinishTimeMs = null;
-    current.cooldownUntil = null; // unlock the card for everyone immediately
+    current.cooldownUntil = null;
     current._undoFlagRemoveHistory = wasFinished && !current.finished;
     return current;
   }, (error, committed, snap) => {
@@ -645,7 +660,7 @@ function undoLastTap(id){
       const val = snap.val();
       if(val && val._undoFlagRemoveHistory){
         removeLastHistoryEntry(id);
-        db.ref(`liveSession/swimmers/${id}/_undoFlagRemoveHistory`).remove();
+        db.ref(`liveSessions/${slot}/swimmers/${id}/_undoFlagRemoveHistory`).remove();
       }
     }
   });
@@ -659,7 +674,7 @@ function removeLastHistoryEntry(id){
 
 /* ---------- Save finished swim to permanent history ---------- */
 function saveToHistory(id, swimmerState){
-  db.ref('liveSession').once('value', s => {
+  sessionRef.once('value', s => {
     const session = s.val();
     if(!session) return;
     const entry = {
