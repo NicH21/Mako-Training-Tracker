@@ -451,11 +451,25 @@ function pad(n){ return n.toString().padStart(2, '0'); }
 /* ---------- Swimmer grid ---------- */
 function renderSwimmerGrid(session){
   swimmerGrid.innerHTML = '';
-  Object.entries(session.swimmers || {}).forEach(([id, s]) => {
+
+  // Compute state for every swimmer first, then sort so tappable cards
+  // bubble to the top — coach's eyes should land on who's actionable right now.
+  const entries = Object.entries(session.swimmers || {}).map(([id, s]) => {
     const isLastLap = !s.finished && s.remaining <= TAP_DECREMENT_M;
     const remainingCooldownMs = (s.cooldownUntil || 0) - Date.now();
     const inCooldown = cooldownEnabled && !s.finished && remainingCooldownMs > 0;
 
+    let sortRank;
+    if(s.finished) sortRank = 2;
+    else if(inCooldown) sortRank = 1;
+    else sortRank = 0; // available to tap — bubbles to top
+
+    return { id, s, isLastLap, inCooldown, remainingCooldownMs, sortRank };
+  });
+
+  entries.sort((a, b) => a.sortRank - b.sortRank);
+
+  entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs }) => {
     const card = document.createElement('div');
     card.className = 'card'
       + (s.finished ? ' finished' : '')
