@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sessions — Squad Timer</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --pool-deep:      #061826;
+    --pool-mid:       #0d2c3f;
+    --lane-rope:      #f2c14e;
+    --lane-rope-dim:  #a9893a;
+    --foam:           #eef6f5;
+    --slate:          #5c7a8a;
+    --coral:          #ff6b5e;
+    --green-go:       #4ecb8d;
+    --font-display:   'Oswald', sans-serif;
+    --font-body:      'Inter', sans-serif;
+    --font-mono:      'Space Mono', monospace;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0;
+    background:radial-gradient(ellipse at top, var(--pool-mid) 0%, var(--pool-deep) 70%);
+    color:var(--foam);
+    font-family:var(--font-body);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .lane-band{
+    height:6px; width:100%;
+    background:repeating-linear-gradient(90deg,var(--lane-rope) 0px,var(--lane-rope) 22px,var(--pool-deep) 22px,var(--pool-deep) 34px);
+    opacity:.55;
+  }
+
+  header{
+    padding:20px 20px 8px;
+    max-width:1100px;
+    margin:0 auto;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    margin:0 0 4px;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:clamp(28px,5vw,40px);
+    margin:0;
+  }
+  .nav-links{ display:flex; gap:10px; }
+  .nav-link{
+    font-family:var(--font-body);
+    font-size:13px;
+    color:var(--slate);
+    text-decoration:none;
+    border:1px solid rgba(255,255,255,0.15);
+    padding:8px 14px;
+    border-radius:8px;
+  }
+  .nav-link:hover{ color:var(--lane-rope); border-color:var(--lane-rope); }
+
+  main{
+    max-width:1100px;
+    margin:0 auto;
+    padding:20px;
+  }
+
+  .intro{
+    color:var(--slate);
+    font-size:14px;
+    margin:0 0 20px;
+    max-width:600px;
+  }
+
+  .slot-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+    gap:16px;
+  }
+
+  .slot-card{
+    background:var(--pool-mid);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:16px;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  .slot-card .rope{
+    height:4px;
+    background:repeating-linear-gradient(90deg,var(--lane-rope-dim) 0 10px,transparent 10px 16px);
+  }
+  .slot-body{
+    padding:20px;
+    flex:1;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .slot-number{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--slate);
+    margin:0 0 10px;
+  }
+
+  .slot-status-open .slot-title{
+    font-family:var(--font-display);
+    font-size:20px;
+    font-weight:600;
+    color:var(--slate);
+    margin:0 0 6px;
+  }
+  .slot-status-active .slot-title{
+    font-family:var(--font-display);
+    font-size:20px;
+    font-weight:600;
+    color:var(--green-go);
+    margin:0 0 6px;
+  }
+  .slot-status-active.paused .slot-title{ color:var(--lane-rope); }
+
+  .slot-meta{
+    font-size:13px;
+    color:var(--slate);
+    margin:0 0 4px;
+  }
+  .slot-meta strong{ color:var(--foam); }
+
+  .slot-actions{
+    margin-top:auto;
+    padding-top:16px;
+    display:flex;
+    gap:8px;
+  }
+
+  .btn-join{
+    flex:1;
+    background:var(--lane-rope);
+    color:var(--pool-deep);
+    border:none;
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:14px;
+    letter-spacing:.02em;
+    padding:11px;
+    border-radius:9px;
+    cursor:pointer;
+    text-transform:uppercase;
+    text-align:center;
+    text-decoration:none;
+    display:block;
+  }
+  .btn-start{
+    flex:1;
+    background:transparent;
+    border:1px solid var(--lane-rope);
+    color:var(--lane-rope);
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:14px;
+    letter-spacing:.02em;
+    padding:11px;
+    border-radius:9px;
+    cursor:pointer;
+    text-transform:uppercase;
+    text-align:center;
+    text-decoration:none;
+    display:block;
+  }
+  .btn-end-small{
+    background:transparent;
+    border:1px solid rgba(255,107,94,0.35);
+    color:var(--coral);
+    font-family:var(--font-body);
+    font-size:12px;
+    padding:11px 12px;
+    border-radius:9px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  footer{
+    text-align:center;
+    color:var(--slate);
+    font-size:12px;
+    padding:20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="lane-band"></div>
+
+<header>
+  <div>
+    <p class="eyebrow">Squad Timer</p>
+    <h1>Sessions</h1>
+  </div>
+  <div class="nav-links">
+    <a class="nav-link" href="dashboard.html">Dashboard</a>
+    <a class="nav-link" href="settings.html">Settings</a>
+  </div>
+</header>
+
+<main>
+  <p class="intro">Up to 5 training sessions can run at once. Join one already in progress, or start a new one in an open slot.</p>
+  <div class="slot-grid" id="slotGrid"></div>
+</main>
+
+<footer>Every slot shares the same swimmer roster and history.</footer>
+
+<script>
+const firebaseConfig = {
+  apiKey:            "AIzaSyBj4RW9UFi9EM-sMb-RVycurfDFZqpI1RM",
+  authDomain:         "mako-training.firebaseapp.com",
+  databaseURL:        "https://mako-training-default-rtdb.firebaseio.com",
+  projectId:          "mako-training",
+  storageBucket:      "mako-training.firebasestorage.app",
+  messagingSenderId:  "665163331085",
+  appId:              "1:665163331085:web:159031c9073cbf3e91c744"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const NUM_SLOTS = 5;
+const slotGrid = document.getElementById('slotGrid');
+
+// build the 5 placeholder cards immediately, fill in live data as it arrives
+for(let i = 1; i <= NUM_SLOTS; i++){
+  const card = document.createElement('div');
+  card.className = 'slot-card';
+  card.id = `slot-card-${i}`;
+  card.innerHTML = `
+    <div class="rope"></div>
+    <div class="slot-body">
+      <p class="slot-number">Session ${i}</p>
+      <div class="slot-status-open">
+        <p class="slot-title">Open</p>
+        <p class="slot-meta">No session running here yet.</p>
+      </div>
+      <div class="slot-actions">
+        <a class="btn-start" href="admin.html?slot=${i}">Start session</a>
+      </div>
+    </div>
+  `;
+  slotGrid.appendChild(card);
+}
+
+for(let i = 1; i <= NUM_SLOTS; i++){
+  db.ref(`liveSessions/${i}`).on('value', snap => {
+    renderSlot(i, snap.val());
+  });
+}
+
+function renderSlot(slotNum, session){
+  const card = document.getElementById(`slot-card-${slotNum}`);
+  const body = card.querySelector('.slot-body');
+
+  if(!session || !session.active){
+    body.innerHTML = `
+      <p class="slot-number">Session ${slotNum}</p>
+      <div class="slot-status-open">
+        <p class="slot-title">Open</p>
+        <p class="slot-meta">No session running here yet.</p>
+      </div>
+      <div class="slot-actions">
+        <a class="btn-start" href="admin.html?slot=${slotNum}">Start session</a>
+      </div>
+    `;
+    return;
+  }
+
+  const swimmerCount = Object.keys(session.swimmers || {}).length;
+  const finishedCount = Object.values(session.swimmers || {}).filter(s => s.finished).length;
+  const label = session.label ? session.label : `Session ${slotNum}`;
+
+  body.innerHTML = `
+    <p class="slot-number">Session ${slotNum}${session.paused ? ' · Paused' : ''}</p>
+    <div class="slot-status-active${session.paused ? ' paused' : ''}">
+      <p class="slot-title">${escapeHtml(label)}</p>
+      <p class="slot-meta"><strong>${session.distance}m</strong> swim</p>
+      <p class="slot-meta"><strong>${finishedCount}/${swimmerCount}</strong> finished</p>
+    </div>
+    <div class="slot-actions">
+      <a class="btn-join" href="index.html?slot=${slotNum}">Join board</a>
+      <button class="btn-end-small" onclick="endSlot(${slotNum}, '${escapeHtml(label).replace(/'/g, "\\'")}')">End</button>
+    </div>
+  `;
+}
+
+function endSlot(slotNum, label){
+  if(!confirm(`End "${label}"? The board will clear for everyone on this slot.`)) return;
+  db.ref(`liveSessions/${slotNum}`).remove();
+}
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+</script>
+</body>
+</html>
