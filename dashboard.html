@@ -335,6 +335,8 @@
     <button class="tab-btn active" id="tabIndividual">Individual</button>
     <button class="tab-btn" id="tabSquad">Whole squad</button>
     <button class="tab-btn" id="tabLeaderboard">Leaderboard</button>
+    <button class="tab-btn" id="tabPoints">Points</button>
+    <button class="tab-btn" id="tabRecords">Club Records</button>
   </div>
 
   <!-- ============ INDIVIDUAL VIEW ============ -->
@@ -409,6 +411,27 @@
     </section>
   </section>
 
+  <!-- ============ POINTS VIEW ============ -->
+  <section class="view" id="viewPoints">
+    <section class="panel">
+      <h2>Points ranking</h2>
+      <p class="empty-note" style="margin-bottom:16px;">
+        5 points for swimming, plus 10 points per 1% improvement on a personal best.
+        A small +15 bonus goes to whoever currently holds the squad's fastest time in an event.
+      </p>
+      <div id="pointsList"></div>
+    </section>
+  </section>
+
+  <!-- ============ CLUB RECORDS VIEW ============ -->
+  <section class="view" id="viewRecords">
+    <section class="panel">
+      <h2>Club records</h2>
+      <p class="empty-note" style="margin-bottom:16px;">Fastest time ever recorded, per event, across every swimmer and session.</p>
+      <div id="recordsList"></div>
+    </section>
+  </section>
+
 </main>
 
 <footer>Times pulled live from every recorded session.</footer>
@@ -443,16 +466,24 @@ let squadChart = null;
 document.getElementById('tabIndividual').onclick = () => switchTab('individual');
 document.getElementById('tabSquad').onclick = () => switchTab('squad');
 document.getElementById('tabLeaderboard').onclick = () => switchTab('leaderboard');
+document.getElementById('tabPoints').onclick = () => switchTab('points');
+document.getElementById('tabRecords').onclick = () => switchTab('records');
 
 function switchTab(tab){
   document.getElementById('tabIndividual').classList.toggle('active', tab === 'individual');
   document.getElementById('tabSquad').classList.toggle('active', tab === 'squad');
   document.getElementById('tabLeaderboard').classList.toggle('active', tab === 'leaderboard');
+  document.getElementById('tabPoints').classList.toggle('active', tab === 'points');
+  document.getElementById('tabRecords').classList.toggle('active', tab === 'records');
   document.getElementById('viewIndividual').classList.toggle('active', tab === 'individual');
   document.getElementById('viewSquad').classList.toggle('active', tab === 'squad');
   document.getElementById('viewLeaderboard').classList.toggle('active', tab === 'leaderboard');
+  document.getElementById('viewPoints').classList.toggle('active', tab === 'points');
+  document.getElementById('viewRecords').classList.toggle('active', tab === 'records');
   if(tab === 'squad') renderSquadChart();
   if(tab === 'leaderboard') renderLeaderboard();
+  if(tab === 'points') renderPoints();
+  if(tab === 'records') renderRecords();
 }
 
 /* ---------- Load roster ---------- */
@@ -470,6 +501,8 @@ db.ref('swimmerTimes').on('value', snap => {
   if(selectedSwimmerId) renderIndividual(selectedSwimmerId);
   renderSquadChart();
   renderLeaderboard();
+  renderPoints();
+  renderRecords();
 });
 
 /* ---------- Swimmer picker ---------- */
@@ -858,6 +891,130 @@ function renderLeaderboard(){
       <div class="leaderboard-rank">${i + 1}</div>
       <div class="leaderboard-name">${b.name}</div>
       <div class="leaderboard-time">${formatTime(b.timeMs)}<span class="leaderboard-sub">${formatDate(b.date)}</span></div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+/* ---------- Points ranking ---------- */
+const PARTICIPATION_POINTS = 5;
+const IMPROVEMENT_POINTS_PER_PERCENT = 10;
+const BEST_TIME_BONUS = 15;
+
+function computePoints(){
+  const points = {}; // swimmerId -> total points
+  const bestHolderPerEvent = {}; // event -> { id, timeMs }
+
+  // Pass 1: find whoever currently holds the squad's fastest time per event
+  Object.entries(allTimes).forEach(([id, entries]) => {
+    if(!roster[id]) return;
+    Object.values(entries || {}).forEach(e => {
+      if(!bestHolderPerEvent[e.event] || e.timeMs < bestHolderPerEvent[e.event].timeMs){
+        bestHolderPerEvent[e.event] = { id, timeMs: e.timeMs };
+      }
+    });
+  });
+
+  // Pass 2: participation + personal-improvement points, event by event
+  Object.entries(allTimes).forEach(([id, entriesObj]) => {
+    if(!roster[id]) return;
+    points[id] = points[id] || 0;
+
+    const byEvent = {};
+    Object.values(entriesObj || {}).forEach(e => {
+      byEvent[e.event] = byEvent[e.event] || [];
+      byEvent[e.event].push(e);
+    });
+
+    Object.values(byEvent).forEach(entries => {
+      const sorted = [...entries].sort((a, b) => new Date(a.date) - new Date(b.date));
+      let bestSoFar = null;
+
+      sorted.forEach(e => {
+        points[id] += PARTICIPATION_POINTS;
+
+        if(bestSoFar !== null && e.timeMs < bestSoFar){
+          const improvementPct = ((bestSoFar - e.timeMs) / bestSoFar) * 100;
+          points[id] += Math.round(improvementPct * IMPROVEMENT_POINTS_PER_PERCENT);
+        }
+
+        if(bestSoFar === null || e.timeMs < bestSoFar) bestSoFar = e.timeMs;
+      });
+    });
+  });
+
+  // Bonus: whoever currently holds the squad's best time in each event
+  const bestTimeEvents = {}; // id -> [event names they currently top]
+  Object.entries(bestHolderPerEvent).forEach(([event, holder]) => {
+    points[holder.id] = (points[holder.id] || 0) + BEST_TIME_BONUS;
+    bestTimeEvents[holder.id] = bestTimeEvents[holder.id] || [];
+    bestTimeEvents[holder.id].push(event);
+  });
+
+  return { points, bestTimeEvents };
+}
+
+function renderPoints(){
+  const list = document.getElementById('pointsList');
+  const { points, bestTimeEvents } = computePoints();
+
+  const ranked = Object.entries(points)
+    .filter(([id]) => roster[id])
+    .map(([id, pts]) => ({ id, pts, swimmer: roster[id], tops: bestTimeEvents[id] || [] }))
+    .sort((a, b) => b.pts - a.pts);
+
+  if(ranked.length === 0){
+    list.innerHTML = '<p class="empty-note">No recorded swims yet.</p>';
+    return;
+  }
+
+  list.innerHTML = '';
+  ranked.forEach((r, i) => {
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
+    const topsNote = r.tops.length
+      ? `<span class="leaderboard-sub">Squad best: ${r.tops.join(', ')}</span>`
+      : '';
+    row.innerHTML = `
+      <div class="leaderboard-rank">${i + 1}</div>
+      <div class="leaderboard-name">${r.swimmer.name} ${r.swimmer.surname} ${topsNote}</div>
+      <div class="leaderboard-time">${r.pts} pts</div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+/* ---------- Club records ---------- */
+function renderRecords(){
+  const list = document.getElementById('recordsList');
+  const recordsByEvent = {}; // event -> { id, timeMs, date }
+
+  Object.entries(allTimes).forEach(([id, entries]) => {
+    if(!roster[id]) return;
+    Object.values(entries || {}).forEach(e => {
+      if(!recordsByEvent[e.event] || e.timeMs < recordsByEvent[e.event].timeMs){
+        recordsByEvent[e.event] = { id, timeMs: e.timeMs, date: e.date };
+      }
+    });
+  });
+
+  const events = Object.keys(recordsByEvent).sort((a, b) => parseInt(a) - parseInt(b));
+
+  if(events.length === 0){
+    list.innerHTML = '<p class="empty-note">No recorded swims yet.</p>';
+    return;
+  }
+
+  list.innerHTML = '';
+  events.forEach(event => {
+    const rec = recordsByEvent[event];
+    const swimmer = roster[rec.id];
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
+    row.innerHTML = `
+      <div class="leaderboard-rank">🏆</div>
+      <div class="leaderboard-name">${event}<span class="leaderboard-sub">${swimmer.name} ${swimmer.surname}</span></div>
+      <div class="leaderboard-time">${formatTime(rec.timeMs)}<span class="leaderboard-sub">${formatDate(rec.date)}</span></div>
     `;
     list.appendChild(row);
   });
