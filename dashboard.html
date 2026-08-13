@@ -343,7 +343,8 @@
   <section class="view active" id="viewIndividual">
     <section class="panel">
       <h2>Choose a swimmer</h2>
-      <div class="picker-row" id="swimmerPicker" style="margin-top:14px;">
+      <div class="picker-row" id="squadPickerFilter" style="margin-top:14px;"></div>
+      <div class="picker-row" id="swimmerPicker" style="margin-top:8px;">
         <p class="empty-note">No swimmers on the roster yet.</p>
       </div>
     </section>
@@ -489,6 +490,7 @@ function switchTab(tab){
 /* ---------- Load roster ---------- */
 db.ref('roster').on('value', snap => {
   roster = snap.val() || {};
+  renderSquadPickerFilter();
   renderSwimmerPicker();
 });
 
@@ -506,11 +508,44 @@ db.ref('swimmerTimes').on('value', snap => {
 });
 
 /* ---------- Swimmer picker ---------- */
+let activeSquadFilter = null; // null = "All squads"
+
+function renderSquadPickerFilter(){
+  const filter = document.getElementById('squadPickerFilter');
+  const squads = new Set();
+  Object.values(roster).forEach(s => { if(s.squad) squads.add(s.squad); });
+
+  if(squads.size === 0){
+    filter.innerHTML = '';
+    return;
+  }
+
+  filter.innerHTML = '';
+
+  const allChip = document.createElement('button');
+  allChip.className = 'picker-chip' + (activeSquadFilter === null ? ' selected' : '');
+  allChip.textContent = 'All squads';
+  allChip.onclick = () => { activeSquadFilter = null; renderSquadPickerFilter(); renderSwimmerPicker(); };
+  filter.appendChild(allChip);
+
+  [...squads].sort().forEach(sq => {
+    const chip = document.createElement('button');
+    chip.className = 'picker-chip' + (sq === activeSquadFilter ? ' selected' : '');
+    chip.textContent = sq;
+    chip.onclick = () => { activeSquadFilter = sq; renderSquadPickerFilter(); renderSwimmerPicker(); };
+    filter.appendChild(chip);
+  });
+}
+
 function renderSwimmerPicker(){
   const picker = document.getElementById('swimmerPicker');
-  const ids = Object.keys(roster);
+  const ids = Object.keys(roster).filter(id =>
+    activeSquadFilter === null || roster[id].squad === activeSquadFilter
+  );
   if(ids.length === 0){
-    picker.innerHTML = '<p class="empty-note">No swimmers on the roster yet.</p>';
+    picker.innerHTML = Object.keys(roster).length === 0
+      ? '<p class="empty-note">No swimmers on the roster yet.</p>'
+      : '<p class="empty-note">No swimmers in this squad.</p>';
     return;
   }
   picker.innerHTML = '';
