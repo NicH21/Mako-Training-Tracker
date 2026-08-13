@@ -416,8 +416,8 @@
     <section class="panel">
       <h2>Points ranking</h2>
       <p class="empty-note" style="margin-bottom:16px;">
-        5 points for swimming, plus 10 points per 1% improvement on a personal best.
-        A small +15 bonus goes to whoever currently holds the squad's fastest time in an event.
+        1 point for swimming, plus 1 point per 1% improvement on a personal best.
+        A small +3 bonus goes to whoever currently holds the squad's fastest time in an event.
       </p>
       <div id="pointsList"></div>
     </section>
@@ -897,9 +897,9 @@ function renderLeaderboard(){
 }
 
 /* ---------- Points ranking ---------- */
-const PARTICIPATION_POINTS = 5;
-const IMPROVEMENT_POINTS_PER_PERCENT = 10;
-const BEST_TIME_BONUS = 15;
+const PARTICIPATION_POINTS = 1;
+const IMPROVEMENT_POINTS_PER_PERCENT = 1;
+const BEST_TIME_BONUS = 3;
 
 function computePoints(){
   const points = {}; // swimmerId -> total points
