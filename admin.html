@@ -329,6 +329,11 @@
     </div>
 
     <label style="display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--slate); margin-bottom:8px;">
+      Filter by squad
+    </label>
+    <div class="roster-picker" id="squadFilter" style="margin-bottom:16px;"></div>
+
+    <label style="display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--slate); margin-bottom:8px;">
       Swimmers today
     </label>
     <div class="roster-picker" id="rosterPicker">
@@ -344,6 +349,10 @@
       <div class="field">
         <label for="newSurname">Surname</label>
         <input type="text" id="newSurname" placeholder="Surname">
+      </div>
+      <div class="field">
+        <label for="newSquad">Squad (optional)</label>
+        <input type="text" id="newSquad" placeholder="e.g. Sprint Squad">
       </div>
       <button class="btn-ghost" id="addSwimmerBtn">+ Add to roster</button>
     </div>
@@ -397,28 +406,63 @@ const labelInput         = document.getElementById('labelInput');
 const distanceInput      = document.getElementById('distanceInput');
 const startBtn           = document.getElementById('startBtn');
 const rosterPicker       = document.getElementById('rosterPicker');
+const squadFilter         = document.getElementById('squadFilter');
 const selectedCountEl    = document.getElementById('selectedCount');
 const addSwimmerBtn      = document.getElementById('addSwimmerBtn');
 const newNameInput       = document.getElementById('newName');
 const newSurnameInput    = document.getElementById('newSurname');
+const newSquadInput      = document.getElementById('newSquad');
 const rosterManageList   = document.getElementById('rosterManageList');
 
 let roster = {};
 let selectedIds = new Set();
 let sessionActive = false;
 let editingId = null;
+let activeSquadFilter = null; // null = "All squads"
 
 /* ---------- Roster: shared across every slot ---------- */
 db.ref('roster').on('value', snap => {
   roster = snap.val() || {};
+  renderSquadFilter();
   renderRosterPicker();
   renderRosterManageList();
 });
 
+function renderSquadFilter(){
+  const squads = new Set();
+  Object.values(roster).forEach(s => { if(s.squad) squads.add(s.squad); });
+
+  if(squads.size === 0){
+    squadFilter.innerHTML = '<p class="roster-empty">No squads set yet — add a squad name when adding a swimmer.</p>';
+    return;
+  }
+
+  squadFilter.innerHTML = '';
+
+  const allChip = document.createElement('button');
+  allChip.className = 'roster-chip' + (activeSquadFilter === null ? ' selected' : '');
+  allChip.textContent = 'All squads';
+  allChip.onclick = () => { activeSquadFilter = null; renderSquadFilter(); renderRosterPicker(); };
+  squadFilter.appendChild(allChip);
+
+  [...squads].sort().forEach(sq => {
+    const chip = document.createElement('button');
+    chip.className = 'roster-chip' + (sq === activeSquadFilter ? ' selected' : '');
+    chip.textContent = sq;
+    chip.onclick = () => { activeSquadFilter = sq; renderSquadFilter(); renderRosterPicker(); };
+    squadFilter.appendChild(chip);
+  });
+}
+
 function renderRosterPicker(){
-  const ids = Object.keys(roster);
+  const ids = Object.keys(roster).filter(id =>
+    activeSquadFilter === null || roster[id].squad === activeSquadFilter
+  );
+
   if(ids.length === 0){
-    rosterPicker.innerHTML = '<p class="roster-empty">No swimmers on the roster yet — add one below.</p>';
+    rosterPicker.innerHTML = Object.keys(roster).length === 0
+      ? '<p class="roster-empty">No swimmers on the roster yet — add one below.</p>'
+      : '<p class="roster-empty">No swimmers in this squad.</p>';
     return;
   }
   rosterPicker.innerHTML = '';
@@ -459,6 +503,10 @@ function renderRosterManageList(){
       const surnameInput = document.createElement('input');
       surnameInput.type = 'text';
       surnameInput.value = s.surname;
+      const squadInput = document.createElement('input');
+      squadInput.type = 'text';
+      squadInput.placeholder = 'Squad';
+      squadInput.value = s.squad || '';
 
       const saveBtn = document.createElement('button');
       saveBtn.className = 'icon-btn save';
@@ -466,8 +514,9 @@ function renderRosterManageList(){
       saveBtn.onclick = () => {
         const newName = nameInput.value.trim();
         const newSurname = surnameInput.value.trim();
+        const newSquad = squadInput.value.trim();
         if(!newName || !newSurname) return;
-        db.ref(`roster/${id}`).update({ name: newName, surname: newSurname });
+        db.ref(`roster/${id}`).update({ name: newName, surname: newSurname, squad: newSquad || null });
         editingId = null;
       };
 
@@ -478,12 +527,13 @@ function renderRosterManageList(){
 
       row.appendChild(nameInput);
       row.appendChild(surnameInput);
+      row.appendChild(squadInput);
       row.appendChild(saveBtn);
       row.appendChild(cancelBtn);
     } else {
       const nameEl = document.createElement('div');
       nameEl.className = 'roster-manage-name';
-      nameEl.textContent = `${s.name} ${s.surname}`;
+      nameEl.textContent = s.squad ? `${s.name} ${s.surname} · ${s.squad}` : `${s.name} ${s.surname}`;
 
       const editBtn = document.createElement('button');
       editBtn.className = 'icon-btn';
@@ -511,11 +561,13 @@ function renderRosterManageList(){
 addSwimmerBtn.onclick = () => {
   const name = newNameInput.value.trim();
   const surname = newSurnameInput.value.trim();
+  const squad = newSquadInput.value.trim();
   if(!name || !surname) return;
   const newRef = db.ref('roster').push();
-  newRef.set({ name, surname });
+  newRef.set({ name, surname, squad: squad || null });
   newNameInput.value = '';
   newSurnameInput.value = '';
+  newSquadInput.value = '';
 };
 
 function validateStart(){
