@@ -242,6 +242,14 @@
   .card.finished .remaining{ color:var(--green-go); font-size:30px; }
   .card.finished .tap-hint{ color:var(--green-go); }
 
+  .card.record{
+    background:linear-gradient(160deg, rgba(242,193,78,0.28), var(--pool-mid) 60%);
+    border-color:var(--lane-rope);
+    box-shadow:0 0 0 1px rgba(242,193,78,0.3), 0 0 24px rgba(242,193,78,0.25);
+  }
+  .card.record .remaining{ color:var(--lane-rope); font-size:30px; }
+  .card.record .tap-hint{ color:var(--lane-rope); font-weight:700; }
+
   .card.on-cooldown .tap-area{
     cursor:not-allowed;
     opacity:.55;
@@ -492,6 +500,7 @@ function renderSwimmerGrid(session){
     const card = document.createElement('div');
     card.className = 'card'
       + (s.finished ? ' finished' : '')
+      + (s.finished && s.recordFlag ? ' record' : '')
       + (isLastLap ? ' last-lap' : '')
       + (inCooldown ? ' on-cooldown' : '');
 
@@ -523,7 +532,9 @@ function renderSwimmerGrid(session){
 
     const hint = document.createElement('p');
     hint.className = 'tap-hint';
-    if(s.finished){
+    if(s.finished && s.recordFlag){
+      hint.textContent = '🏆 New club record!';
+    } else if(s.finished){
       hint.textContent = 'Finished';
     } else if(inCooldown){
       hint.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
@@ -677,12 +688,32 @@ function saveToHistory(id, swimmerState){
   sessionRef.once('value', s => {
     const session = s.val();
     if(!session) return;
+    const event = `${session.distance}m`;
     const entry = {
       date: new Date().toISOString(),
-      event: `${session.distance}m`,
+      event,
       timeMs: swimmerState.finishTimeMs
     };
-    db.ref(`swimmerTimes/${id}`).push(entry);
+
+    // check against every recorded time (any swimmer, any past session) for this event
+    db.ref('swimmerTimes').once('value', allSnap => {
+      const allTimes = allSnap.val() || {};
+      let priorBest = null;
+      Object.values(allTimes).forEach(swimmerEntries => {
+        Object.values(swimmerEntries || {}).forEach(e => {
+          if(e.event === event && (priorBest === null || e.timeMs < priorBest)){
+            priorBest = e.timeMs;
+          }
+        });
+      });
+
+      const isNewRecord = priorBest === null || entry.timeMs < priorBest;
+      db.ref(`swimmerTimes/${id}`).push(entry);
+
+      if(isNewRecord){
+        db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ recordFlag: true });
+      }
+    });
   });
 }
 </script>
