@@ -743,6 +743,19 @@ function renderHistoryTable(entries, bestEntryId){
     }
 
     const actionCell = document.createElement('td');
+    actionCell.style.display = 'flex';
+    actionCell.style.gap = '6px';
+
+    if(e.splits && e.splits.length > 0){
+      const splitsBtn = document.createElement('button');
+      splitsBtn.className = 'row-delete';
+      splitsBtn.style.color = 'var(--lane-rope)';
+      splitsBtn.style.borderColor = 'rgba(242,193,78,0.35)';
+      splitsBtn.textContent = 'Splits';
+      splitsBtn.onclick = () => toggleSplitsRow(row, e);
+      actionCell.appendChild(splitsBtn);
+    }
+
     const delBtn = document.createElement('button');
     delBtn.className = 'row-delete';
     delBtn.textContent = 'Delete';
@@ -759,6 +772,38 @@ function renderHistoryTable(entries, bestEntryId){
     row.appendChild(actionCell);
     body.appendChild(row);
   });
+}
+
+function toggleSplitsRow(afterRow, entry){
+  const existing = afterRow.nextElementSibling;
+  if(existing && existing.classList.contains('splits-row')){
+    existing.remove();
+    return;
+  }
+
+  // close any other open splits row first
+  document.querySelectorAll('.splits-row').forEach(el => el.remove());
+
+  const splitsRow = document.createElement('tr');
+  splitsRow.className = 'splits-row';
+  const cell = document.createElement('td');
+  cell.colSpan = 5;
+  cell.style.padding = '14px 10px';
+  cell.style.background = 'rgba(255,255,255,0.02)';
+
+  let prevMs = 0;
+  const lapRows = entry.splits.map((splitMs, i) => {
+    const lapTime = splitMs - prevMs;
+    prevMs = splitMs;
+    return `<div style="display:flex; justify-content:space-between; padding:4px 0; font-family:var(--font-mono); font-size:13px;">
+      <span style="color:var(--slate);">Lap ${i + 1} (2 laps · 50m)</span>
+      <span>${formatTime(lapTime)} split &nbsp;·&nbsp; <span style="color:var(--lane-rope);">${formatTime(splitMs)} total</span></span>
+    </div>`;
+  }).join('');
+
+  cell.innerHTML = `<div style="font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--slate); margin-bottom:8px;">Splits — ${entry.event}</div>${lapRows}`;
+  splitsRow.appendChild(cell);
+  afterRow.after(splitsRow);
 }
 
 /* ---------- Squad view ---------- */
