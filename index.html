@@ -596,13 +596,18 @@ function tapSwimmer(id, startTime){
     current.previousRemaining = current.remaining;
     current.previousFinished = current.finished || false;
     current.previousFinishTimeMs = current.finishTimeMs || null;
+    current.previousSplits = current.splits ? [...current.splits] : [];
 
     const newRemaining = current.remaining - TAP_DECREMENT_M;
+    const elapsedNow = Date.now() - startTime;
+
+    current.splits = current.splits || [];
+    current.splits.push(elapsedNow);
 
     if(newRemaining <= 0){
       current.remaining = 0;
       current.finished = true;
-      current.finishTimeMs = Date.now() - startTime;
+      current.finishTimeMs = elapsedNow;
     } else {
       current.remaining = newRemaining;
     }
@@ -660,9 +665,11 @@ function undoLastTap(id){
     current.remaining = current.previousRemaining;
     current.finished = current.previousFinished;
     current.finishTimeMs = current.previousFinishTimeMs;
+    current.splits = current.previousSplits || [];
     current.previousRemaining = null;
     current.previousFinished = null;
     current.previousFinishTimeMs = null;
+    current.previousSplits = null;
     current.cooldownUntil = null;
     current._undoFlagRemoveHistory = wasFinished && !current.finished;
     return current;
@@ -692,7 +699,8 @@ function saveToHistory(id, swimmerState){
     const entry = {
       date: new Date().toISOString(),
       event,
-      timeMs: swimmerState.finishTimeMs
+      timeMs: swimmerState.finishTimeMs,
+      splits: swimmerState.splits || []
     };
 
     // check against every recorded time (any swimmer, any past session) for this event
