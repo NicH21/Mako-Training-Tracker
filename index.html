@@ -380,7 +380,7 @@ let clockInterval = null;
 let cooldownInterval = null;
 let currentSession = null;
 
-const COOLDOWN_MS = 20000; // 20s lockout on a swimmer's card after each tap, shared across every device
+const COOLDOWN_MS = 15000; // 15s lockout on a swimmer's card after each tap, shared across every device
 let cooldownEnabled = true; // default on; overridden by /settings/cooldownEnabled
 
 db.ref('settings/cooldownEnabled').on('value', snap => {
