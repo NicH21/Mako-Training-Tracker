@@ -313,7 +313,19 @@ function renderSlot(slotNum, session){
 
 function endSlot(slotNum, label){
   if(!confirm(`End "${label}"? The board will clear for everyone on this slot.`)) return;
-  db.ref(`liveSessions/${slotNum}`).remove();
+  db.ref(`liveSessions/${slotNum}`).once('value', snap => {
+    const session = snap.val();
+    if(session){
+      db.ref('completedSessions').push({
+        date: new Date().toISOString(),
+        label: session.label || null,
+        distance: session.distance,
+        slot: slotNum,
+        swimmers: session.swimmers || {}
+      });
+    }
+    db.ref(`liveSessions/${slotNum}`).remove();
+  });
 }
 
 function escapeHtml(str){
