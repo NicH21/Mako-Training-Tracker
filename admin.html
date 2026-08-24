@@ -595,7 +595,19 @@ sessionRef.on('value', snap => {
 
 endSessionBtn.onclick = () => {
   if(!confirm('End the current session on this slot? The live board will clear for everyone viewing it.')) return;
-  sessionRef.remove();
+  sessionRef.once('value', snap => {
+    const session = snap.val();
+    if(session){
+      db.ref('completedSessions').push({
+        date: new Date().toISOString(),
+        label: session.label || null,
+        distance: session.distance,
+        slot: slot,
+        swimmers: session.swimmers || {}
+      });
+    }
+    sessionRef.remove();
+  });
 };
 
 /* ---------- Start session ---------- */
