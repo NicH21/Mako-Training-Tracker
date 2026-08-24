@@ -335,7 +335,7 @@
     <button class="tab-btn active" id="tabIndividual">Individual</button>
     <button class="tab-btn" id="tabSquad">Whole squad</button>
     <button class="tab-btn" id="tabLeaderboard">Leaderboard</button>
-    <button class="tab-btn" id="tabPoints">Points</button>
+    <button class="tab-btn" id="tabSessionHistory">Session History</button>
     <button class="tab-btn" id="tabRecords">Club Records</button>
   </div>
 
@@ -412,15 +412,25 @@
     </section>
   </section>
 
-  <!-- ============ POINTS VIEW ============ -->
-  <section class="view" id="viewPoints">
-    <section class="panel">
-      <h2>Points ranking</h2>
-      <p class="empty-note" style="margin-bottom:16px;">
-        1 point for swimming, plus 1 point per 1% improvement on a personal best.
-        A small +3 bonus goes to whoever currently holds the squad's fastest time in an event.
-      </p>
-      <div id="pointsList"></div>
+  <!-- ============ SESSION HISTORY VIEW ============ -->
+  <section class="view" id="viewSessionHistory">
+    <section class="panel" id="sessionListPanel">
+      <h2>Past sessions</h2>
+      <p class="empty-note" style="margin-bottom:16px;">Every session's results, kept together as it was swum.</p>
+      <div id="sessionHistoryList"></div>
+    </section>
+
+    <section class="panel" id="sessionDetailPanel" style="display:none;">
+      <div class="panel-header-row">
+        <h2 id="sessionDetailHeading">—</h2>
+        <button class="btn-ghost" id="backToSessionListBtn">← All sessions</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Rank</th><th>Swimmer</th><th>Time</th></tr>
+        </thead>
+        <tbody id="sessionDetailBody"></tbody>
+      </table>
     </section>
   </section>
 
@@ -467,23 +477,23 @@ let squadChart = null;
 document.getElementById('tabIndividual').onclick = () => switchTab('individual');
 document.getElementById('tabSquad').onclick = () => switchTab('squad');
 document.getElementById('tabLeaderboard').onclick = () => switchTab('leaderboard');
-document.getElementById('tabPoints').onclick = () => switchTab('points');
+document.getElementById('tabSessionHistory').onclick = () => switchTab('sessionhistory');
 document.getElementById('tabRecords').onclick = () => switchTab('records');
 
 function switchTab(tab){
   document.getElementById('tabIndividual').classList.toggle('active', tab === 'individual');
   document.getElementById('tabSquad').classList.toggle('active', tab === 'squad');
   document.getElementById('tabLeaderboard').classList.toggle('active', tab === 'leaderboard');
-  document.getElementById('tabPoints').classList.toggle('active', tab === 'points');
+  document.getElementById('tabSessionHistory').classList.toggle('active', tab === 'sessionhistory');
   document.getElementById('tabRecords').classList.toggle('active', tab === 'records');
   document.getElementById('viewIndividual').classList.toggle('active', tab === 'individual');
   document.getElementById('viewSquad').classList.toggle('active', tab === 'squad');
   document.getElementById('viewLeaderboard').classList.toggle('active', tab === 'leaderboard');
-  document.getElementById('viewPoints').classList.toggle('active', tab === 'points');
+  document.getElementById('viewSessionHistory').classList.toggle('active', tab === 'sessionhistory');
   document.getElementById('viewRecords').classList.toggle('active', tab === 'records');
   if(tab === 'squad') renderSquadChart();
   if(tab === 'leaderboard') renderLeaderboard();
-  if(tab === 'points') renderPoints();
+  if(tab === 'sessionhistory') renderSessionHistoryList();
   if(tab === 'records') renderRecords();
 }
 
@@ -503,8 +513,14 @@ db.ref('swimmerTimes').on('value', snap => {
   if(selectedSwimmerId) renderIndividual(selectedSwimmerId);
   renderSquadChart();
   renderLeaderboard();
-  renderPoints();
   renderRecords();
+});
+
+/* ---------- Load completed session snapshots ---------- */
+let completedSessions = {};
+db.ref('completedSessions').on('value', snap => {
+  completedSessions = snap.val() || {};
+  renderSessionHistoryList();
 });
 
 /* ---------- Swimmer picker ---------- */
@@ -976,94 +992,6 @@ function renderLeaderboard(){
   });
 }
 
-/* ---------- Points ranking ---------- */
-const PARTICIPATION_POINTS = 1;
-const IMPROVEMENT_POINTS_PER_PERCENT = 1;
-const BEST_TIME_BONUS = 3;
-
-function computePoints(){
-  const points = {}; // swimmerId -> total points
-  const bestHolderPerEvent = {}; // event -> { id, timeMs }
-
-  // Pass 1: find whoever currently holds the squad's fastest time per event
-  Object.entries(allTimes).forEach(([id, entries]) => {
-    if(!roster[id]) return;
-    Object.values(entries || {}).forEach(e => {
-      if(!bestHolderPerEvent[e.event] || e.timeMs < bestHolderPerEvent[e.event].timeMs){
-        bestHolderPerEvent[e.event] = { id, timeMs: e.timeMs };
-      }
-    });
-  });
-
-  // Pass 2: participation + personal-improvement points, event by event
-  Object.entries(allTimes).forEach(([id, entriesObj]) => {
-    if(!roster[id]) return;
-    points[id] = points[id] || 0;
-
-    const byEvent = {};
-    Object.values(entriesObj || {}).forEach(e => {
-      byEvent[e.event] = byEvent[e.event] || [];
-      byEvent[e.event].push(e);
-    });
-
-    Object.values(byEvent).forEach(entries => {
-      const sorted = [...entries].sort((a, b) => new Date(a.date) - new Date(b.date));
-      let bestSoFar = null;
-
-      sorted.forEach(e => {
-        points[id] += PARTICIPATION_POINTS;
-
-        if(bestSoFar !== null && e.timeMs < bestSoFar){
-          const improvementPct = ((bestSoFar - e.timeMs) / bestSoFar) * 100;
-          points[id] += Math.round(improvementPct * IMPROVEMENT_POINTS_PER_PERCENT);
-        }
-
-        if(bestSoFar === null || e.timeMs < bestSoFar) bestSoFar = e.timeMs;
-      });
-    });
-  });
-
-  // Bonus: whoever currently holds the squad's best time in each event
-  const bestTimeEvents = {}; // id -> [event names they currently top]
-  Object.entries(bestHolderPerEvent).forEach(([event, holder]) => {
-    points[holder.id] = (points[holder.id] || 0) + BEST_TIME_BONUS;
-    bestTimeEvents[holder.id] = bestTimeEvents[holder.id] || [];
-    bestTimeEvents[holder.id].push(event);
-  });
-
-  return { points, bestTimeEvents };
-}
-
-function renderPoints(){
-  const list = document.getElementById('pointsList');
-  const { points, bestTimeEvents } = computePoints();
-
-  const ranked = Object.entries(points)
-    .filter(([id]) => roster[id])
-    .map(([id, pts]) => ({ id, pts, swimmer: roster[id], tops: bestTimeEvents[id] || [] }))
-    .sort((a, b) => b.pts - a.pts);
-
-  if(ranked.length === 0){
-    list.innerHTML = '<p class="empty-note">No recorded swims yet.</p>';
-    return;
-  }
-
-  list.innerHTML = '';
-  ranked.forEach((r, i) => {
-    const row = document.createElement('div');
-    row.className = 'leaderboard-row';
-    const topsNote = r.tops.length
-      ? `<span class="leaderboard-sub">Squad best: ${r.tops.join(', ')}</span>`
-      : '';
-    row.innerHTML = `
-      <div class="leaderboard-rank">${i + 1}</div>
-      <div class="leaderboard-name">${r.swimmer.name} ${r.swimmer.surname} ${topsNote}</div>
-      <div class="leaderboard-time">${r.pts} pts</div>
-    `;
-    list.appendChild(row);
-  });
-}
-
 /* ---------- Club records ---------- */
 function renderRecords(){
   const list = document.getElementById('recordsList');
@@ -1098,6 +1026,89 @@ function renderRecords(){
     `;
     list.appendChild(row);
   });
+}
+
+/* ---------- Session History ---------- */
+function renderSessionHistoryList(){
+  const list = document.getElementById('sessionHistoryList');
+  const sessionIds = Object.keys(completedSessions)
+    .sort((a, b) => new Date(completedSessions[b].date) - new Date(completedSessions[a].date));
+
+  if(sessionIds.length === 0){
+    list.innerHTML = '<p class="empty-note">No completed sessions yet — they\'ll appear here once a coach ends a session.</p>';
+    return;
+  }
+
+  list.innerHTML = '';
+  sessionIds.forEach(sid => {
+    const session = completedSessions[sid];
+    const swimmers = Object.values(session.swimmers || {});
+    const finishedCount = swimmers.filter(s => s.finished).length;
+    const label = session.label || `Session ${session.slot || ''}`;
+
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
+    row.style.cursor = 'pointer';
+    row.innerHTML = `
+      <div class="leaderboard-rank">🏊</div>
+      <div class="leaderboard-name">${escapeHtml(label)}<span class="leaderboard-sub">${session.distance}m · ${finishedCount}/${swimmers.length} finished</span></div>
+      <div class="leaderboard-time" style="font-size:13px;">${formatDate(session.date)}</div>
+    `;
+    row.onclick = () => showSessionDetail(sid);
+    list.appendChild(row);
+  });
+}
+
+function showSessionDetail(sid){
+  const session = completedSessions[sid];
+  if(!session) return;
+
+  document.getElementById('sessionListPanel').style.display = 'none';
+  document.getElementById('sessionDetailPanel').style.display = 'block';
+
+  const label = session.label || `Session ${session.slot || ''}`;
+  document.getElementById('sessionDetailHeading').textContent =
+    `${label} — ${session.distance}m — ${formatDate(session.date)}`;
+
+  const swimmers = Object.values(session.swimmers || {})
+    .filter(s => s.finished)
+    .sort((a, b) => a.finishTimeMs - b.finishTimeMs);
+
+  const notFinished = Object.values(session.swimmers || {}).filter(s => !s.finished);
+
+  const body = document.getElementById('sessionDetailBody');
+  body.innerHTML = '';
+
+  swimmers.forEach((s, i) => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>${i + 1}</td>
+      <td>${escapeHtml(s.name)} ${escapeHtml(s.surname)}</td>
+      <td>${formatTime(s.finishTimeMs)}</td>
+    `;
+    body.appendChild(row);
+  });
+
+  notFinished.forEach(s => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>—</td>
+      <td>${escapeHtml(s.name)} ${escapeHtml(s.surname)}</td>
+      <td style="color:var(--slate);">Did not finish</td>
+    `;
+    body.appendChild(row);
+  });
+}
+
+document.getElementById('backToSessionListBtn').onclick = () => {
+  document.getElementById('sessionDetailPanel').style.display = 'none';
+  document.getElementById('sessionListPanel').style.display = 'block';
+};
+
+function escapeHtml(str){
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
 }
 
 /* ---------- CSV export helper ---------- */
