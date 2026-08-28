@@ -7,6 +7,7 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
   :root{
@@ -389,6 +390,21 @@
   </section>
 
   <section class="panel">
+    <h2>Import from Excel</h2>
+    <p class="roster-empty" style="margin-bottom:14px;">
+      Upload an .xlsx or .csv file with columns <strong style="color:var(--foam); font-style:normal;">Name</strong>,
+      <strong style="color:var(--foam); font-style:normal;">Surname</strong>, and optionally
+      <strong style="color:var(--foam); font-style:normal;">Squad</strong> (header row required, any column order).
+    </p>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="color:var(--slate); font-size:13px;">
+      <button class="btn-ghost" id="importBtn" disabled>Import swimmers</button>
+    </div>
+    <div id="importPreview" style="margin-top:14px;"></div>
+    <p id="importResult" style="font-size:13px; color:var(--green-go); margin-top:10px;"></p>
+  </section>
+
+  <section class="panel">
     <h2>Manage roster</h2>
     <div id="rosterManageList">
       <p class="roster-empty">No swimmers to manage yet.</p>
@@ -647,6 +663,99 @@ addSwimmerBtn.onclick = () => {
   newNameInput.value = '';
   newSurnameInput.value = '';
   newSquadInput.value = '';
+};
+
+/* ---------- Import roster from Excel/CSV ---------- */
+const importFileInput = document.getElementById('importFileInput');
+const importBtn        = document.getElementById('importBtn');
+const importPreview     = document.getElementById('importPreview');
+const importResult      = document.getElementById('importResult');
+
+let parsedImportRows = [];
+
+importFileInput.addEventListener('change', () => {
+  importResult.textContent = '';
+  importPreview.innerHTML = '';
+  parsedImportRows = [];
+  importBtn.disabled = true;
+
+  const file = importFileInput.files[0];
+  if(!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try{
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+      parsedImportRows = rows.map(row => {
+        // match column headers case-insensitively, allow a few common variants
+        const keys = Object.keys(row);
+        const findCol = (...names) => {
+          const key = keys.find(k => names.includes(k.trim().toLowerCase()));
+          return key ? String(row[key]).trim() : '';
+        };
+        return {
+          name: findCol('name', 'first name', 'firstname'),
+          surname: findCol('surname', 'last name', 'lastname'),
+          squad: findCol('squad', 'group', 'team')
+        };
+      }).filter(r => r.name && r.surname);
+
+      renderImportPreview();
+    } catch(err){
+      importPreview.innerHTML = `<p style="color:var(--coral); font-size:13px;">Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv with a header row.</p>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+function renderImportPreview(){
+  if(parsedImportRows.length === 0){
+    importPreview.innerHTML = `<p style="color:var(--coral); font-size:13px;">No valid rows found — check that the file has Name and Surname columns filled in.</p>`;
+    importBtn.disabled = true;
+    return;
+  }
+
+  const previewRows = parsedImportRows.slice(0, 8).map(r =>
+    `<div style="font-family:var(--font-mono); font-size:12px; padding:3px 0; color:var(--slate);">
+      ${r.name} ${r.surname}${r.squad ? ' · ' + r.squad : ''}
+    </div>`
+  ).join('');
+
+  const moreNote = parsedImportRows.length > 8
+    ? `<div style="font-size:12px; color:var(--slate); margin-top:4px;">…and ${parsedImportRows.length - 8} more</div>`
+    : '';
+
+  importPreview.innerHTML = `
+    <p style="font-size:13px; color:var(--foam); margin-bottom:6px;">Found <strong style="color:var(--green-go);">${parsedImportRows.length}</strong> swimmer${parsedImportRows.length === 1 ? '' : 's'}:</p>
+    ${previewRows}${moreNote}
+  `;
+  importBtn.disabled = false;
+}
+
+importBtn.onclick = () => {
+  if(parsedImportRows.length === 0) return;
+  if(!confirm(`Add ${parsedImportRows.length} swimmer(s) to the roster? This does not check for duplicates.`)) return;
+
+  const updates = {};
+  parsedImportRows.forEach(r => {
+    const newKey = db.ref('roster').push().key;
+    updates[newKey] = { name: r.name, surname: r.surname, squad: r.squad || null };
+  });
+
+  db.ref('roster').update(updates).then(() => {
+    importResult.textContent = `Imported ${parsedImportRows.length} swimmer(s).`;
+    importPreview.innerHTML = '';
+    importFileInput.value = '';
+    importBtn.disabled = true;
+    parsedImportRows = [];
+  }).catch(() => {
+    importResult.textContent = '';
+    importPreview.innerHTML = `<p style="color:var(--coral); font-size:13px;">Import failed — check your connection and try again.</p>`;
+  });
 };
 
 function validateStart(){
