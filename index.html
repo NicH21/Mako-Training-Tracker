@@ -408,6 +408,7 @@ sessionRef.on('value', snap => {
     emptyState.classList.remove('hidden');
     swimmerGrid.innerHTML = '';
     cardRefs.clear();
+    lastRenderedOrder = [];
     if(reorderDebounce) clearTimeout(reorderDebounce);
     stopClock();
     stopCooldownTicker();
@@ -491,6 +492,7 @@ function pad(n){ return n.toString().padStart(2, '0'); }
 /* ---------- Swimmer grid ---------- */
 const cardRefs = new Map(); // swimmerId -> { card, tapArea, remainingEl, hint, nameEl, subEl, undoBtn }
 let reorderDebounce = null;
+let lastRenderedOrder = []; // ids, in the order they were last physically arranged
 
 function renderSwimmerGrid(session){
   const now = session.paused ? session.pausedAt : Date.now();
@@ -625,12 +627,24 @@ function renderSwimmerGrid(session){
   // physically moving cards is delayed briefly so a card can't shift position
   // out from under a coach's finger mid-tap (touchstart on card A, touchend
   // landing on nothing because the grid already reshuffled).
+  const targetOrder = entries.map(e => e.id);
+  const orderUnchanged = targetOrder.length === lastRenderedOrder.length
+    && targetOrder.every((id, i) => id === lastRenderedOrder[i]);
+
+  if(orderUnchanged){
+    // nothing actually needs to move — don't touch the DOM at all, so a
+    // tap in progress on any card (last-lap or otherwise) is never disturbed
+    if(reorderDebounce) clearTimeout(reorderDebounce);
+    return;
+  }
+
   if(reorderDebounce) clearTimeout(reorderDebounce);
   reorderDebounce = setTimeout(() => {
     entries.forEach(({ id }) => {
       const refs = cardRefs.get(id);
       if(refs) swimmerGrid.appendChild(refs.card);
     });
+    lastRenderedOrder = targetOrder;
   }, 500);
 }
 
