@@ -739,41 +739,40 @@ function undoLastTap(id){
 /* ---------- Save finished swim to permanent history ---------- */
 function saveToHistory(id, swimmerState){
   const historyKey = swimmerState.historyKey;
-  if(!historyKey) return; // safety net — should always exist on a real finish
+  if(!historyKey || !currentSession) return; // safety net — should always exist on a real finish
 
-  sessionRef.once('value', s => {
-    const session = s.val();
-    if(!session) return;
-    const event = `${session.distance}m`;
-    const entry = {
-      date: new Date().toISOString(),
-      event,
-      timeMs: swimmerState.finishTimeMs,
-      splits: swimmerState.splits || []
-    };
+  const event = `${currentSession.distance}m`;
+  const entry = {
+    date: new Date().toISOString(),
+    event,
+    timeMs: swimmerState.finishTimeMs,
+    splits: swimmerState.splits || []
+  };
 
-    // guard: if the swim was undone while we were checking records, don't write a stale entry
-    db.ref(`liveSessions/${slot}/swimmers/${id}`).once('value', liveSnap => {
-      const liveSwimmer = liveSnap.val();
-      if(!liveSwimmer || !liveSwimmer.finished || liveSwimmer.historyKey !== historyKey){
-        return; // undone or superseded — abandon this write
-      }
+  // Single guard read, immediately before writing — minimizes the window
+  // where a fast Undo could otherwise slip past a slower multi-step save.
+  db.ref(`liveSessions/${slot}/swimmers/${id}`).once('value', liveSnap => {
+    const liveSwimmer = liveSnap.val();
+    if(!liveSwimmer || !liveSwimmer.finished || liveSwimmer.historyKey !== historyKey){
+      return; // undone or superseded — abandon this write
+    }
 
+    db.ref(`swimmerTimes/${id}/${historyKey}`).set(entry).then(() => {
+      // Club-record check happens AFTER the entry is safely written — this is
+      // purely cosmetic (the gold "New club record!" flag) and never risks
+      // creating a duplicate history entry even if it runs late or is skipped.
       db.ref('swimmerTimes').once('value', allSnap => {
         const allTimes = allSnap.val() || {};
-        let priorBest = null;
+        let bestForEvent = null;
         Object.values(allTimes).forEach(swimmerEntries => {
           Object.values(swimmerEntries || {}).forEach(e => {
-            if(e.event === event && (priorBest === null || e.timeMs < priorBest)){
-              priorBest = e.timeMs;
+            if(e.event === event && (bestForEvent === null || e.timeMs < bestForEvent)){
+              bestForEvent = e.timeMs;
             }
           });
         });
 
-        const isNewRecord = priorBest === null || entry.timeMs < priorBest;
-        db.ref(`swimmerTimes/${id}/${historyKey}`).set(entry);
-
-        if(isNewRecord){
+        if(bestForEvent === entry.timeMs){
           db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ recordFlag: true });
         }
       });
