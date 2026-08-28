@@ -803,6 +803,7 @@ startBtn.onclick = () => {
   const distance = parseInt(distanceInput.value, 10);
   const label = labelInput.value.trim();
   const startTime = firebase.database.ServerValue.TIMESTAMP;
+  const sessionId = db.ref('liveSessions').push().key; // stable ID for this specific session run
 
   const swimmers = {};
   selectedIds.forEach(id => {
@@ -820,6 +821,7 @@ startBtn.onclick = () => {
     distance,
     label: label || null,
     startTime,
+    sessionId,
     active: true,
     paused: false,
     pausedAt: null,
