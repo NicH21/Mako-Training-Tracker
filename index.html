@@ -259,6 +259,15 @@
     font-weight:600;
   }
 
+  .card.not-started{
+    opacity:.5;
+  }
+  .card.not-started .tap-area{ cursor:not-allowed; }
+  .card.not-started .tap-hint{
+    color:var(--lane-rope-dim);
+    font-weight:600;
+  }
+
   .card.last-lap{
     animation: lastLapStrobe 1.6s ease-in-out infinite;
   }
@@ -481,28 +490,37 @@ function pad(n){ return n.toString().padStart(2, '0'); }
 function renderSwimmerGrid(session){
   swimmerGrid.innerHTML = '';
 
+  const now = session.paused ? session.pausedAt : Date.now();
+
   const entries = Object.entries(session.swimmers || {}).map(([id, s]) => {
-    const isLastLap = !s.finished && s.remaining <= TAP_DECREMENT_M;
+    const delayMs = s.startDelayMs || 0;
+    const effectiveStart = session.startTime + delayMs;
+    const notYetStarted = !s.finished && now < effectiveStart;
+    const remainingDelayMs = effectiveStart - now;
+
+    const isLastLap = !s.finished && !notYetStarted && s.remaining <= TAP_DECREMENT_M;
     const remainingCooldownMs = (s.cooldownUntil || 0) - Date.now();
-    const inCooldown = cooldownEnabled && !s.finished && remainingCooldownMs > 0;
+    const inCooldown = cooldownEnabled && !s.finished && !notYetStarted && remainingCooldownMs > 0;
 
     let sortRank;
-    if(s.finished) sortRank = 2;
+    if(s.finished) sortRank = 3;
+    else if(notYetStarted) sortRank = 2;
     else if(inCooldown) sortRank = 1;
     else sortRank = 0;
 
-    return { id, s, isLastLap, inCooldown, remainingCooldownMs, sortRank };
+    return { id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs, sortRank };
   });
 
   entries.sort((a, b) => a.sortRank - b.sortRank);
 
-  entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs }) => {
+  entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs }) => {
     const card = document.createElement('div');
     card.className = 'card'
       + (s.finished ? ' finished' : '')
       + (s.finished && s.recordFlag ? ' record' : '')
       + (isLastLap ? ' last-lap' : '')
-      + (inCooldown ? ' on-cooldown' : '');
+      + (inCooldown ? ' on-cooldown' : '')
+      + (notYetStarted ? ' not-started' : '');
 
     const rope = document.createElement('div');
     rope.className = 'rope';
@@ -519,7 +537,7 @@ function renderSwimmerGrid(session){
 
     const subEl = document.createElement('p');
     subEl.className = 'swimmer-sub';
-    subEl.textContent = `${session.distance}m swim`;
+    subEl.textContent = (s.startDelayMs ? `${session.distance}m swim · +${Math.round(s.startDelayMs/1000)}s send-off` : `${session.distance}m swim`);
 
     const remainingEl = document.createElement('div');
     if(s.finished){
@@ -536,6 +554,8 @@ function renderSwimmerGrid(session){
       hint.textContent = '🏆 New club record!';
     } else if(s.finished){
       hint.textContent = 'Finished';
+    } else if(notYetStarted){
+      hint.textContent = `Starts in ${Math.ceil(remainingDelayMs / 1000)}s`;
     } else if(inCooldown){
       hint.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
     } else if(isLastLap){
@@ -550,7 +570,7 @@ function renderSwimmerGrid(session){
     body.appendChild(hint);
     tapArea.appendChild(body);
 
-    if(!s.finished && !inCooldown){
+    if(!s.finished && !inCooldown && !notYetStarted){
       tapArea.onclick = () => tapSwimmer(id, session.startTime);
     }
 
@@ -599,7 +619,7 @@ function tapSwimmer(id, startTime){
     current.previousSplits = current.splits ? [...current.splits] : [];
 
     const newRemaining = current.remaining - TAP_DECREMENT_M;
-    const elapsedNow = Date.now() - startTime;
+    const elapsedNow = (Date.now() - startTime) - (current.startDelayMs || 0);
 
     current.splits = current.splits || [];
     current.splits.push(elapsedNow);
@@ -639,7 +659,7 @@ function adjustRemaining(id, deltaM, startTime){
     current.remaining = newRemaining;
     if(newRemaining <= 0 && !current.finished){
       current.finished = true;
-      current.finishTimeMs = Date.now() - startTime;
+      current.finishTimeMs = (Date.now() - startTime) - (current.startDelayMs || 0);
     } else if(newRemaining > 0 && current.finished){
       current.finished = false;
       current.finishTimeMs = null;
