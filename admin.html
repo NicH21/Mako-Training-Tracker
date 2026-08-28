@@ -200,6 +200,29 @@
   }
   .selected-count strong{ color:var(--green-go); }
 
+  .delay-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:8px 0;
+    border-bottom:1px solid rgba(255,255,255,0.05);
+  }
+  .delay-row:last-child{ border-bottom:none; }
+  .delay-row-name{ font-size:14px; flex:1; }
+  .delay-row input[type=number]{
+    background:var(--pool-deep);
+    border:1px solid rgba(255,255,255,0.15);
+    color:var(--foam);
+    font-family:var(--font-mono);
+    font-size:14px;
+    padding:6px 10px;
+    border-radius:7px;
+    width:70px;
+    text-align:center;
+  }
+  .delay-row-suffix{ font-size:12px; color:var(--slate); }
+
   .active-notice{
     background:rgba(255,107,94,0.1);
     border:1px solid rgba(255,107,94,0.4);
@@ -341,6 +364,13 @@
     </div>
     <p class="selected-count" id="selectedCount"></p>
 
+    <div id="delayPanel" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.08);">
+      <label style="display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--slate); margin-bottom:8px;">
+        Send-off delays (seconds) — for staggered starts, e.g. group 2 at +5s, group 3 at +10s
+      </label>
+      <div id="delayList"></div>
+    </div>
+
     <div class="add-swimmer">
       <div class="field">
         <label for="newName">Name</label>
@@ -413,6 +443,10 @@ const newNameInput       = document.getElementById('newName');
 const newSurnameInput    = document.getElementById('newSurname');
 const newSquadInput      = document.getElementById('newSquad');
 const rosterManageList   = document.getElementById('rosterManageList');
+const delayPanel         = document.getElementById('delayPanel');
+const delayList          = document.getElementById('delayList');
+
+let swimmerDelays = {}; // swimmerId -> delay in seconds
 
 let roster = {};
 let selectedIds = new Set();
@@ -472,8 +506,15 @@ function renderRosterPicker(){
     chip.className = 'roster-chip' + (selectedIds.has(id) ? ' selected' : '');
     chip.textContent = `${s.name} ${s.surname}`;
     chip.onclick = () => {
-      selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
+      if(selectedIds.has(id)){
+        selectedIds.delete(id);
+        delete swimmerDelays[id];
+      } else {
+        selectedIds.add(id);
+        swimmerDelays[id] = swimmerDelays[id] || 0;
+      }
       renderRosterPicker();
+      renderDelayList();
       validateStart();
     };
     rosterPicker.appendChild(chip);
@@ -481,6 +522,44 @@ function renderRosterPicker(){
   selectedCountEl.innerHTML = selectedIds.size
     ? `<strong>${selectedIds.size}</strong> swimmer${selectedIds.size === 1 ? '' : 's'} selected`
     : '';
+}
+
+function renderDelayList(){
+  if(selectedIds.size === 0){
+    delayPanel.style.display = 'none';
+    return;
+  }
+  delayPanel.style.display = 'block';
+  delayList.innerHTML = '';
+  [...selectedIds].forEach(id => {
+    const s = roster[id];
+    if(!s) return;
+    const row = document.createElement('div');
+    row.className = 'delay-row';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'delay-row-name';
+    nameEl.textContent = `${s.name} ${s.surname}`;
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.step = '1';
+    input.value = swimmerDelays[id] || 0;
+    input.oninput = () => {
+      const val = parseInt(input.value, 10);
+      swimmerDelays[id] = isNaN(val) || val < 0 ? 0 : val;
+    };
+
+    const suffix = document.createElement('span');
+    suffix.className = 'delay-row-suffix';
+    suffix.textContent = 's after start';
+
+    row.appendChild(nameEl);
+    row.appendChild(input);
+    row.appendChild(suffix);
+    delayList.appendChild(row);
+  });
 }
 
 function renderRosterManageList(){
@@ -623,7 +702,8 @@ startBtn.onclick = () => {
       surname: roster[id].surname,
       remaining: distance,
       finished: false,
-      finishTimeMs: null
+      finishTimeMs: null,
+      startDelayMs: (swimmerDelays[id] || 0) * 1000
     };
   });
 
