@@ -617,6 +617,7 @@ function tapSwimmer(id, startTime){
     current.previousFinished = current.finished || false;
     current.previousFinishTimeMs = current.finishTimeMs || null;
     current.previousSplits = current.splits ? [...current.splits] : [];
+    current.previousHistoryKey = current.historyKey || null;
 
     const newRemaining = current.remaining - TAP_DECREMENT_M;
     const elapsedNow = (Date.now() - startTime) - (current.startDelayMs || 0);
@@ -628,6 +629,7 @@ function tapSwimmer(id, startTime){
       current.remaining = 0;
       current.finished = true;
       current.finishTimeMs = elapsedNow;
+      current.historyKey = db.ref('swimmerTimes/' + id).push().key; // reserve a deterministic ID now
     } else {
       current.remaining = newRemaining;
     }
@@ -652,6 +654,7 @@ function adjustRemaining(id, deltaM, startTime){
     current.previousRemaining = current.remaining;
     current.previousFinished = current.finished || false;
     current.previousFinishTimeMs = current.finishTimeMs || null;
+    current.previousHistoryKey = current.historyKey || null;
 
     let newRemaining = (current.remaining || 0) - deltaM;
     if(newRemaining < 0) newRemaining = 0;
@@ -660,9 +663,11 @@ function adjustRemaining(id, deltaM, startTime){
     if(newRemaining <= 0 && !current.finished){
       current.finished = true;
       current.finishTimeMs = (Date.now() - startTime) - (current.startDelayMs || 0);
+      current.historyKey = db.ref('swimmerTimes/' + id).push().key;
     } else if(newRemaining > 0 && current.finished){
       current.finished = false;
       current.finishTimeMs = null;
+      current.historyKey = null;
     }
     return current;
   }, (error, committed, snap) => {
@@ -682,36 +687,42 @@ function undoLastTap(id){
     if(!current || current.previousRemaining === undefined) return current;
 
     const wasFinished = current.finished;
+    const keyBeingUndone = current.historyKey || null;
+
     current.remaining = current.previousRemaining;
     current.finished = current.previousFinished;
     current.finishTimeMs = current.previousFinishTimeMs;
     current.splits = current.previousSplits || [];
+    current.historyKey = current.previousHistoryKey || null;
     current.previousRemaining = null;
     current.previousFinished = null;
     current.previousFinishTimeMs = null;
     current.previousSplits = null;
-    current.cooldownUntil = null;
-    current._undoFlagRemoveHistory = wasFinished && !current.finished;
+    current.previousHistoryKey = null;
+    current.cooldownUntil = null; // immediately tappable again — no wait
+    current._historyKeyToRemove = (wasFinished && !current.finished) ? keyBeingUndone : null;
     return current;
   }, (error, committed, snap) => {
     if(committed){
       const val = snap.val();
-      if(val && val._undoFlagRemoveHistory){
-        removeLastHistoryEntry(id);
-        db.ref(`liveSessions/${slot}/swimmers/${id}/_undoFlagRemoveHistory`).remove();
+      if(val && val._historyKeyToRemove){
+        db.ref(`swimmerTimes/${id}/${val._historyKeyToRemove}`).remove();
       }
+      // belt-and-suspenders: force cooldown clear even if a near-simultaneous
+      // write raced the transaction above
+      db.ref(`liveSessions/${slot}/swimmers/${id}`).update({
+        cooldownUntil: null,
+        _historyKeyToRemove: null
+      });
     }
-  });
-}
-
-function removeLastHistoryEntry(id){
-  db.ref(`swimmerTimes/${id}`).limitToLast(1).once('value', snap => {
-    snap.forEach(child => { child.ref.remove(); });
   });
 }
 
 /* ---------- Save finished swim to permanent history ---------- */
 function saveToHistory(id, swimmerState){
+  const historyKey = swimmerState.historyKey;
+  if(!historyKey) return; // safety net — should always exist on a real finish
+
   sessionRef.once('value', s => {
     const session = s.val();
     if(!session) return;
@@ -723,24 +734,31 @@ function saveToHistory(id, swimmerState){
       splits: swimmerState.splits || []
     };
 
-    // check against every recorded time (any swimmer, any past session) for this event
-    db.ref('swimmerTimes').once('value', allSnap => {
-      const allTimes = allSnap.val() || {};
-      let priorBest = null;
-      Object.values(allTimes).forEach(swimmerEntries => {
-        Object.values(swimmerEntries || {}).forEach(e => {
-          if(e.event === event && (priorBest === null || e.timeMs < priorBest)){
-            priorBest = e.timeMs;
-          }
-        });
-      });
-
-      const isNewRecord = priorBest === null || entry.timeMs < priorBest;
-      db.ref(`swimmerTimes/${id}`).push(entry);
-
-      if(isNewRecord){
-        db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ recordFlag: true });
+    // guard: if the swim was undone while we were checking records, don't write a stale entry
+    db.ref(`liveSessions/${slot}/swimmers/${id}`).once('value', liveSnap => {
+      const liveSwimmer = liveSnap.val();
+      if(!liveSwimmer || !liveSwimmer.finished || liveSwimmer.historyKey !== historyKey){
+        return; // undone or superseded — abandon this write
       }
+
+      db.ref('swimmerTimes').once('value', allSnap => {
+        const allTimes = allSnap.val() || {};
+        let priorBest = null;
+        Object.values(allTimes).forEach(swimmerEntries => {
+          Object.values(swimmerEntries || {}).forEach(e => {
+            if(e.event === event && (priorBest === null || e.timeMs < priorBest)){
+              priorBest = e.timeMs;
+            }
+          });
+        });
+
+        const isNewRecord = priorBest === null || entry.timeMs < priorBest;
+        db.ref(`swimmerTimes/${id}/${historyKey}`).set(entry);
+
+        if(isNewRecord){
+          db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ recordFlag: true });
+        }
+      });
     });
   });
 }
