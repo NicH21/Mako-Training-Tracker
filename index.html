@@ -408,6 +408,7 @@ sessionRef.on('value', snap => {
     emptyState.classList.remove('hidden');
     swimmerGrid.innerHTML = '';
     cardRefs.clear();
+    if(reorderDebounce) clearTimeout(reorderDebounce);
     stopClock();
     stopCooldownTicker();
     return;
@@ -489,6 +490,7 @@ function pad(n){ return n.toString().padStart(2, '0'); }
 
 /* ---------- Swimmer grid ---------- */
 const cardRefs = new Map(); // swimmerId -> { card, tapArea, remainingEl, hint, nameEl, subEl, undoBtn }
+let reorderDebounce = null;
 
 function renderSwimmerGrid(session){
   const now = session.paused ? session.pausedAt : Date.now();
@@ -570,6 +572,7 @@ function renderSwimmerGrid(session){
 
       refs = { card, tapArea, nameEl, subEl, remainingEl, hint, undoBtn, minusBtn, plusBtn };
       cardRefs.set(id, refs);
+      swimmerGrid.appendChild(card); // new card — show it right away, ordering settles shortly after
     }
 
     // update classes
@@ -616,11 +619,19 @@ function renderSwimmerGrid(session){
     refs.undoBtn.onclick = (e) => { e.stopPropagation(); undoLastTap(id); };
     refs.minusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, -TAP_DECREMENT_M, session.startTime); };
     refs.plusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, TAP_DECREMENT_M, session.startTime); };
-
-    // appendChild on an already-attached node MOVES it — this reorders
-    // the grid without destroying/recreating any card mid-tap
-    swimmerGrid.appendChild(refs.card);
   });
+
+  // Reordering is debounced — content/classes above update instantly, but
+  // physically moving cards is delayed briefly so a card can't shift position
+  // out from under a coach's finger mid-tap (touchstart on card A, touchend
+  // landing on nothing because the grid already reshuffled).
+  if(reorderDebounce) clearTimeout(reorderDebounce);
+  reorderDebounce = setTimeout(() => {
+    entries.forEach(({ id }) => {
+      const refs = cardRefs.get(id);
+      if(refs) swimmerGrid.appendChild(refs.card);
+    });
+  }, 500);
 }
 
 /* ---------- Tap handler (atomic transaction) ---------- */
@@ -724,7 +735,7 @@ function undoLastTap(id){
     if(committed){
       const val = snap.val();
       if(val && val._historyKeyToRemove){
-        db.ref(`swimmerTimes/${id}/${val._historyKeyToRemove}`).remove();
+        cancelOrDeleteHistoryEntry(id, val._historyKeyToRemove);
       }
       // belt-and-suspenders: force cooldown clear even if a near-simultaneous
       // write raced the transaction above
@@ -733,6 +744,17 @@ function undoLastTap(id){
         _historyKeyToRemove: null
       });
     }
+  });
+}
+
+// Atomically resolves the race with a still-in-flight saveToHistory write:
+// if the entry hasn't been written yet, leave a tombstone so the write
+// cancels itself; if it's already written, delete it directly. Either way,
+// exactly one outcome wins — no window where both can land.
+function cancelOrDeleteHistoryEntry(id, historyKey){
+  db.ref(`swimmerTimes/${id}/${historyKey}`).transaction(current => {
+    if(current === null) return { cancelled: true }; // save hasn't landed — block it
+    return null; // save already landed — delete the real entry
   });
 }
 
@@ -749,33 +771,35 @@ function saveToHistory(id, swimmerState){
     splits: swimmerState.splits || []
   };
 
-  // Single guard read, immediately before writing — minimizes the window
-  // where a fast Undo could otherwise slip past a slower multi-step save.
-  db.ref(`liveSessions/${slot}/swimmers/${id}`).once('value', liveSnap => {
-    const liveSwimmer = liveSnap.val();
-    if(!liveSwimmer || !liveSwimmer.finished || liveSwimmer.historyKey !== historyKey){
-      return; // undone or superseded — abandon this write
-    }
+  // Atomic write: if Undo already left a tombstone at this exact key, this
+  // transaction sees it and cancels itself (deletes the tombstone, writes
+  // nothing). If Undo hasn't run yet, this writes the real entry — and if
+  // Undo runs moments later, cancelOrDeleteHistoryEntry sees real data
+  // sitting there and deletes it directly. Either ordering resolves cleanly.
+  db.ref(`swimmerTimes/${id}/${historyKey}`).transaction(current => {
+    if(current && current.cancelled) return null; // undo got here first — abort
+    return entry;
+  }, (error, committed, snap) => {
+    if(!committed) return;
+    const written = snap.val();
+    if(!written || written.cancelled) return; // cancelled — nothing more to do
 
-    db.ref(`swimmerTimes/${id}/${historyKey}`).set(entry).then(() => {
-      // Club-record check happens AFTER the entry is safely written — this is
-      // purely cosmetic (the gold "New club record!" flag) and never risks
-      // creating a duplicate history entry even if it runs late or is skipped.
-      db.ref('swimmerTimes').once('value', allSnap => {
-        const allTimes = allSnap.val() || {};
-        let bestForEvent = null;
-        Object.values(allTimes).forEach(swimmerEntries => {
-          Object.values(swimmerEntries || {}).forEach(e => {
-            if(e.event === event && (bestForEvent === null || e.timeMs < bestForEvent)){
-              bestForEvent = e.timeMs;
-            }
-          });
+    // Club-record check happens AFTER the entry is safely written — purely
+    // cosmetic (the gold "New club record!" flag), never risks a duplicate.
+    db.ref('swimmerTimes').once('value', allSnap => {
+      const allTimes = allSnap.val() || {};
+      let bestForEvent = null;
+      Object.values(allTimes).forEach(swimmerEntries => {
+        Object.values(swimmerEntries || {}).forEach(e => {
+          if(e.event === event && !e.cancelled && (bestForEvent === null || e.timeMs < bestForEvent)){
+            bestForEvent = e.timeMs;
+          }
         });
-
-        if(bestForEvent === entry.timeMs){
-          db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ recordFlag: true });
-        }
       });
+
+      if(bestForEvent === entry.timeMs){
+        db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ recordFlag: true });
+      }
     });
   });
 }
