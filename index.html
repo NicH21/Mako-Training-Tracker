@@ -749,6 +749,13 @@ function undoLastTap(id){
         cooldownUntil: 0,
         _historyKeyToRemove: null
       });
+
+      // Final safeguard: re-assert zero cooldown a moment later, in case a
+      // slow/retrying tap transaction lands its own cooldown write shortly
+      // after this one and would otherwise "win" the race.
+      setTimeout(() => {
+        db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ cooldownUntil: 0 });
+      }, 600);
     }
   });
 }
