@@ -666,7 +666,7 @@ function tapSwimmer(id, startTime, sessionId){
       current.remaining = newRemaining;
     }
 
-    current.cooldownUntil = (cooldownEnabled && !current.skipNextCooldown) ? Date.now() + COOLDOWN_MS : null;
+    current.cooldownUntil = (cooldownEnabled && !current.skipNextCooldown) ? Date.now() + COOLDOWN_MS : 0;
     current.skipNextCooldown = false;
     return current;
   }, (error, committed, snap) => {
@@ -732,7 +732,7 @@ function undoLastTap(id){
     current.previousFinishTimeMs = null;
     current.previousSplits = null;
     current.previousHistoryKey = null;
-    current.cooldownUntil = null; // immediately tappable again — no wait
+    current.cooldownUntil = 0; // explicit past timestamp — guarantees zero wait, avoids null/deleted-field ambiguity
     current.skipNextCooldown = true; // the NEXT tap also skips its own cooldown
     current._historyKeyToRemove = (wasFinished && !current.finished) ? keyBeingUndone : null;
     return current;
@@ -746,7 +746,7 @@ function undoLastTap(id){
         db.ref(`swimmerTimes/${id}/${val._historyKeyToRemove}`).remove();
       }
       db.ref(`liveSessions/${slot}/swimmers/${id}`).update({
-        cooldownUntil: null,
+        cooldownUntil: 0,
         _historyKeyToRemove: null
       });
     }
