@@ -407,6 +407,7 @@ sessionRef.on('value', snap => {
     sessionBar.classList.add('hidden');
     emptyState.classList.remove('hidden');
     swimmerGrid.innerHTML = '';
+    cardRefs.clear();
     stopClock();
     stopCooldownTicker();
     return;
@@ -487,12 +488,21 @@ function formatElapsed(ms){
 function pad(n){ return n.toString().padStart(2, '0'); }
 
 /* ---------- Swimmer grid ---------- */
+const cardRefs = new Map(); // swimmerId -> { card, tapArea, remainingEl, hint, nameEl, subEl, undoBtn }
+
 function renderSwimmerGrid(session){
-  swimmerGrid.innerHTML = '';
-
   const now = session.paused ? session.pausedAt : Date.now();
+  const swimmers = session.swimmers || {};
 
-  const entries = Object.entries(session.swimmers || {}).map(([id, s]) => {
+  // drop DOM refs for swimmers no longer in this session
+  [...cardRefs.keys()].forEach(id => {
+    if(!swimmers[id]){
+      cardRefs.get(id).card.remove();
+      cardRefs.delete(id);
+    }
+  });
+
+  const entries = Object.entries(swimmers).map(([id, s]) => {
     const delayMs = s.startDelayMs || 0;
     const effectiveStart = session.startTime + delayMs;
     const notYetStarted = !s.finished && now < effectiveStart;
@@ -514,94 +524,102 @@ function renderSwimmerGrid(session){
   entries.sort((a, b) => a.sortRank - b.sortRank);
 
   entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs }) => {
-    const card = document.createElement('div');
-    card.className = 'card'
+    let refs = cardRefs.get(id);
+
+    if(!refs){
+      // build this card's DOM structure once; future renders only update it in place
+      const card = document.createElement('div');
+      const rope = document.createElement('div');
+      rope.className = 'rope';
+      const tapArea = document.createElement('div');
+      tapArea.className = 'tap-area';
+      const body = document.createElement('div');
+      body.className = 'card-body';
+      const nameEl = document.createElement('p');
+      nameEl.className = 'swimmer-name';
+      const subEl = document.createElement('p');
+      subEl.className = 'swimmer-sub';
+      const remainingEl = document.createElement('div');
+      remainingEl.className = 'remaining';
+      const hint = document.createElement('p');
+      hint.className = 'tap-hint';
+
+      body.appendChild(nameEl);
+      body.appendChild(subEl);
+      body.appendChild(remainingEl);
+      body.appendChild(hint);
+      tapArea.appendChild(body);
+      card.appendChild(rope);
+      card.appendChild(tapArea);
+
+      const controls = document.createElement('div');
+      controls.className = 'card-controls';
+      const undoBtn = document.createElement('button');
+      undoBtn.className = 'mini-btn undo';
+      undoBtn.textContent = 'Undo';
+      const minusBtn = document.createElement('button');
+      minusBtn.className = 'mini-btn';
+      minusBtn.textContent = '−50m';
+      const plusBtn = document.createElement('button');
+      plusBtn.className = 'mini-btn';
+      plusBtn.textContent = '+50m';
+      controls.appendChild(undoBtn);
+      controls.appendChild(minusBtn);
+      controls.appendChild(plusBtn);
+      card.appendChild(controls);
+
+      refs = { card, tapArea, nameEl, subEl, remainingEl, hint, undoBtn, minusBtn, plusBtn };
+      cardRefs.set(id, refs);
+    }
+
+    // update classes
+    refs.card.className = 'card'
       + (s.finished ? ' finished' : '')
       + (s.finished && s.recordFlag ? ' record' : '')
       + (isLastLap ? ' last-lap' : '')
       + (inCooldown ? ' on-cooldown' : '')
       + (notYetStarted ? ' not-started' : '');
 
-    const rope = document.createElement('div');
-    rope.className = 'rope';
+    // update text content
+    refs.nameEl.textContent = `${s.name} ${s.surname}`;
+    refs.subEl.textContent = (s.startDelayMs ? `${session.distance}m swim · +${Math.round(s.startDelayMs/1000)}s send-off` : `${session.distance}m swim`);
 
-    const tapArea = document.createElement('div');
-    tapArea.className = 'tap-area';
-
-    const body = document.createElement('div');
-    body.className = 'card-body';
-
-    const nameEl = document.createElement('p');
-    nameEl.className = 'swimmer-name';
-    nameEl.textContent = `${s.name} ${s.surname}`;
-
-    const subEl = document.createElement('p');
-    subEl.className = 'swimmer-sub';
-    subEl.textContent = (s.startDelayMs ? `${session.distance}m swim · +${Math.round(s.startDelayMs/1000)}s send-off` : `${session.distance}m swim`);
-
-    const remainingEl = document.createElement('div');
     if(s.finished){
-      remainingEl.className = 'remaining';
-      remainingEl.textContent = formatElapsed(s.finishTimeMs);
+      refs.remainingEl.textContent = formatElapsed(s.finishTimeMs);
     } else {
-      remainingEl.className = 'remaining';
-      remainingEl.innerHTML = `${s.remaining}<span class="unit">m left</span>`;
+      refs.remainingEl.innerHTML = `${s.remaining}<span class="unit">m left</span>`;
     }
 
-    const hint = document.createElement('p');
-    hint.className = 'tap-hint';
     if(s.finished && s.recordFlag){
-      hint.textContent = '🏆 New club record!';
+      refs.hint.textContent = '🏆 New club record!';
     } else if(s.finished){
-      hint.textContent = 'Finished';
+      refs.hint.textContent = 'Finished';
     } else if(notYetStarted){
-      hint.textContent = `Starts in ${Math.ceil(remainingDelayMs / 1000)}s`;
+      refs.hint.textContent = `Starts in ${Math.ceil(remainingDelayMs / 1000)}s`;
     } else if(inCooldown){
-      hint.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
+      refs.hint.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
     } else if(isLastLap){
-      hint.textContent = 'Last lap!';
+      refs.hint.textContent = 'Last lap!';
     } else {
-      hint.textContent = 'Tap after every 2 laps';
+      refs.hint.textContent = 'Tap after every 2 laps';
     }
 
-    body.appendChild(nameEl);
-    body.appendChild(subEl);
-    body.appendChild(remainingEl);
-    body.appendChild(hint);
-    tapArea.appendChild(body);
-
+    // reassigning .onclick is cheap and safe — doesn't touch the DOM node itself
     if(!s.finished && !inCooldown && !notYetStarted){
-      tapArea.onclick = () => tapSwimmer(id, session.startTime);
+      refs.tapArea.onclick = () => tapSwimmer(id, session.startTime);
+      refs.tapArea.style.cursor = 'pointer';
+    } else {
+      refs.tapArea.onclick = null;
     }
 
-    card.appendChild(rope);
-    card.appendChild(tapArea);
+    refs.undoBtn.disabled = !s.previousRemaining && s.previousRemaining !== 0;
+    refs.undoBtn.onclick = (e) => { e.stopPropagation(); undoLastTap(id); };
+    refs.minusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, -TAP_DECREMENT_M, session.startTime); };
+    refs.plusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, TAP_DECREMENT_M, session.startTime); };
 
-    const controls = document.createElement('div');
-    controls.className = 'card-controls';
-
-    const undoBtn = document.createElement('button');
-    undoBtn.className = 'mini-btn undo';
-    undoBtn.textContent = 'Undo';
-    undoBtn.disabled = !s.previousRemaining && s.previousRemaining !== 0;
-    undoBtn.onclick = (e) => { e.stopPropagation(); undoLastTap(id); };
-
-    const minusBtn = document.createElement('button');
-    minusBtn.className = 'mini-btn';
-    minusBtn.textContent = '−50m';
-    minusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, -TAP_DECREMENT_M, session.startTime); };
-
-    const plusBtn = document.createElement('button');
-    plusBtn.className = 'mini-btn';
-    plusBtn.textContent = '+50m';
-    plusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, TAP_DECREMENT_M, session.startTime); };
-
-    controls.appendChild(undoBtn);
-    controls.appendChild(minusBtn);
-    controls.appendChild(plusBtn);
-    card.appendChild(controls);
-
-    swimmerGrid.appendChild(card);
+    // appendChild on an already-attached node MOVES it — this reorders
+    // the grid without destroying/recreating any card mid-tap
+    swimmerGrid.appendChild(refs.card);
   });
 }
 
