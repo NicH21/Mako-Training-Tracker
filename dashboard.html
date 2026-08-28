@@ -585,6 +585,7 @@ function renderIndividual(id){
   const panel = document.getElementById('individualPanel');
   const swimmer = roster[id];
   const allEntries = Object.entries(allTimes[id] || {})
+    .filter(([entryId, e]) => !e.cancelled)
     .map(([entryId, e]) => ({ ...e, entryId }))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -859,6 +860,7 @@ function renderEventFilter(){
       const swimmer = roster[id];
       if(!swimmer) return;
       Object.values(entries || {}).forEach(e => {
+        if(e.cancelled) return;
         rows.push({ swimmer: `${swimmer.name} ${swimmer.surname}`, date: e.date, event: e.event, time: formatTime(e.timeMs) });
       });
     });
@@ -878,7 +880,7 @@ function renderSquadChart(){
     const swimmer = roster[id];
     if(!swimmer) return;
     const filtered = Object.values(entries || {})
-      .filter(e => e.event === selectedEvent)
+      .filter(e => e.event === selectedEvent && !e.cancelled)
       .sort((a, b) => new Date(a.date) - new Date(b.date));
     if(filtered.length === 0) return;
 
@@ -966,7 +968,7 @@ function renderLeaderboard(){
   Object.entries(allTimes).forEach(([id, entries]) => {
     const swimmer = roster[id];
     if(!swimmer) return;
-    const filtered = Object.values(entries || {}).filter(e => e.event === selectedLeaderboardEvent);
+    const filtered = Object.values(entries || {}).filter(e => e.event === selectedLeaderboardEvent && !e.cancelled);
     if(filtered.length === 0) return;
     const best = filtered.reduce((min, e) => e.timeMs < min.timeMs ? e : min, filtered[0]);
     bests.push({ name: `${swimmer.name} ${swimmer.surname}`, timeMs: best.timeMs, date: best.date });
@@ -1000,6 +1002,7 @@ function renderRecords(){
   Object.entries(allTimes).forEach(([id, entries]) => {
     if(!roster[id]) return;
     Object.values(entries || {}).forEach(e => {
+      if(e.cancelled) return;
       if(!recordsByEvent[e.event] || e.timeMs < recordsByEvent[e.event].timeMs){
         recordsByEvent[e.event] = { id, timeMs: e.timeMs, date: e.date };
       }
