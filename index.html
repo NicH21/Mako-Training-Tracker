@@ -391,10 +391,17 @@ let currentSession = null;
 
 const COOLDOWN_MS = 15000; // 15s lockout on a swimmer's card after each tap, shared across every device
 let cooldownEnabled = true; // default on; overridden by /settings/cooldownEnabled
+let bubbleSortEnabled = true; // default on; overridden by /settings/bubbleSortEnabled
 
 db.ref('settings/cooldownEnabled').on('value', snap => {
   const val = snap.val();
   cooldownEnabled = (val === null) ? true : !!val;
+  if(currentSession) renderSwimmerGrid(currentSession);
+});
+
+db.ref('settings/bubbleSortEnabled').on('value', snap => {
+  const val = snap.val();
+  bubbleSortEnabled = (val === null) ? true : !!val;
   if(currentSession) renderSwimmerGrid(currentSession);
 });
 
@@ -525,7 +532,12 @@ function renderSwimmerGrid(session){
     return { id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs, sortRank };
   });
 
-  entries.sort((a, b) => a.sortRank - b.sortRank);
+  if(bubbleSortEnabled){
+    entries.sort((a, b) => a.sortRank - b.sortRank);
+  } else {
+    // fixed order — alphabetical by name, never shuffles regardless of state
+    entries.sort((a, b) => `${a.s.name} ${a.s.surname}`.localeCompare(`${b.s.name} ${b.s.surname}`));
+  }
 
   entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs }) => {
     let refs = cardRefs.get(id);
