@@ -206,6 +206,93 @@
     gap:10px;
   }
 
+  /* ── Compact / small-device list mode ─────────────── */
+  .compact-list{
+    max-width:640px;
+    margin:0 auto 40px;
+    padding:0 20px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+
+  .compact-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:14px 16px;
+    background:var(--pool-mid);
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:12px;
+    cursor:pointer;
+    -webkit-user-select:none; user-select:none;
+  }
+  .compact-row:active{ transform:scale(.98); }
+
+  .compact-row-main{ flex:1; min-width:0; }
+  .compact-row-name{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:16px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .compact-row-sub{
+    font-size:11px;
+    color:var(--lane-rope-dim);
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    margin-top:2px;
+  }
+
+  .compact-row-dist{
+    font-family:var(--font-mono);
+    font-size:22px;
+    font-weight:700;
+    white-space:nowrap;
+    flex-shrink:0;
+  }
+  .compact-row-dist .unit{
+    font-size:12px;
+    color:var(--slate);
+    font-weight:400;
+    margin-left:3px;
+  }
+
+  .compact-row.finished{ background:linear-gradient(160deg, rgba(78,203,141,0.18), var(--pool-mid) 60%); border-color:var(--green-go); cursor:default; }
+  .compact-row.finished .compact-row-dist{ color:var(--green-go); font-size:18px; }
+  .compact-row.finished .compact-row-sub{ color:var(--green-go); }
+
+  .compact-row.record{
+    background:linear-gradient(160deg, rgba(242,193,78,0.28), var(--pool-mid) 60%);
+    border-color:var(--lane-rope);
+    box-shadow:0 0 0 1px rgba(242,193,78,0.3), 0 0 20px rgba(242,193,78,0.2);
+  }
+  .compact-row.record .compact-row-dist{ color:var(--lane-rope); }
+
+  .compact-row.on-cooldown{ opacity:.55; cursor:not-allowed; }
+  .compact-row.not-started{ opacity:.5; cursor:not-allowed; }
+  .compact-row.last-lap{ animation: lastLapStrobe 1.6s ease-in-out infinite; }
+
+  .compact-row-controls{
+    display:flex;
+    gap:5px;
+    flex-shrink:0;
+  }
+  .compact-mini-btn{
+    background:rgba(255,255,255,0.05);
+    border:1px solid rgba(255,255,255,0.12);
+    color:var(--slate);
+    font-family:var(--font-mono);
+    font-size:11px;
+    padding:6px 8px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+  .compact-mini-btn.undo{ color:var(--coral); border-color:rgba(255,107,94,0.3); }
+
   .card{
     position:relative;
     background:var(--pool-mid);
@@ -376,6 +463,7 @@
 </div>
 
 <section class="lanes-container" id="lanesContainer"></section>
+<section class="compact-list" id="compactList" style="display:none;"></section>
 
 <footer>Tap a name after every 2 laps (50m) &middot; times lock automatically at zero &middot; card flashes red on the last lap<br><span style="opacity:.5; font-size:10px;">build v9-cooldown-fix</span></footer>
 
@@ -416,6 +504,7 @@ const pauseBtn              = document.getElementById('pauseBtn');
 const pausedTag             = document.getElementById('pausedTag');
 const emptyState           = document.getElementById('emptyState');
 const lanesContainer       = document.getElementById('lanesContainer');
+const compactList          = document.getElementById('compactList');
 
 let clockInterval = null;
 let cooldownInterval = null;
@@ -450,6 +539,10 @@ sessionRef.on('value', snap => {
     laneRefs.clear();
     lastRenderedOrder = [];
     if(reorderDebounce) clearTimeout(reorderDebounce);
+    compactList.innerHTML = '';
+    compactRowRefs.clear();
+    compactLastOrder = [];
+    if(compactReorderDebounce) clearTimeout(compactReorderDebounce);
     stopClock();
     stopCooldownTicker();
     return;
@@ -474,7 +567,16 @@ sessionRef.on('value', snap => {
   }
 
   startCooldownTicker();
-  renderSwimmerGrid(session);
+
+  if(session.compactMode){
+    lanesContainer.style.display = 'none';
+    compactList.style.display = 'flex';
+    renderCompactList(session);
+  } else {
+    compactList.style.display = 'none';
+    lanesContainer.style.display = 'flex';
+    renderSwimmerGrid(session);
+  }
 });
 
 function startCooldownTicker(){
@@ -535,19 +637,12 @@ const laneRefs = new Map(); // laneKey -> { column, cardsContainer }
 let reorderDebounce = null;
 let lastRenderedOrder = []; // flat [laneKey, swimmerId] pairs, in last physically-arranged order
 
-function renderSwimmerGrid(session){
+/* Shared derived-state computation used by both the lane view and the compact list */
+function computeEntries(session){
   const now = session.paused ? session.pausedAt : Date.now();
   const swimmers = session.swimmers || {};
 
-  // drop DOM refs for swimmers no longer in this session
-  [...cardRefs.keys()].forEach(id => {
-    if(!swimmers[id]){
-      cardRefs.get(id).card.remove();
-      cardRefs.delete(id);
-    }
-  });
-
-  const entries = Object.entries(swimmers).map(([id, s]) => {
+  return Object.entries(swimmers).map(([id, s]) => {
     const delayMs = s.startDelayMs || 0;
     const effectiveStart = session.startTime + delayMs;
     const notYetStarted = !s.finished && now < effectiveStart;
@@ -567,6 +662,20 @@ function renderSwimmerGrid(session){
 
     return { id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs, sortRank, laneKey };
   });
+}
+
+function renderSwimmerGrid(session){
+  const swimmers = session.swimmers || {};
+
+  // drop DOM refs for swimmers no longer in this session
+  [...cardRefs.keys()].forEach(id => {
+    if(!swimmers[id]){
+      cardRefs.get(id).card.remove();
+      cardRefs.delete(id);
+    }
+  });
+
+  const entries = computeEntries(session);
 
   // group into lanes, ordered numerically (unassigned lane always last)
   const laneKeys = [...new Set(entries.map(e => e.laneKey))].sort((a, b) => {
@@ -734,6 +843,132 @@ function renderSwimmerGrid(session){
       if(refs && laneEntry) laneEntry.cardsContainer.appendChild(refs.card);
     });
     lastRenderedOrder = targetOrder;
+  }, 500);
+}
+
+/* ---------- Compact list (small device mode) ---------- */
+const compactRowRefs = new Map(); // swimmerId -> { row, nameEl, subEl, distEl, undoBtn, minusBtn, plusBtn }
+let compactReorderDebounce = null;
+let compactLastOrder = [];
+
+function renderCompactList(session){
+  const swimmers = session.swimmers || {};
+
+  [...compactRowRefs.keys()].forEach(id => {
+    if(!swimmers[id]){
+      compactRowRefs.get(id).row.remove();
+      compactRowRefs.delete(id);
+    }
+  });
+
+  const entries = computeEntries(session);
+
+  const sortFn = bubbleSortEnabled
+    ? (a, b) => a.sortRank - b.sortRank
+    : (a, b) => `${a.s.name} ${a.s.surname}`.localeCompare(`${b.s.name} ${b.s.surname}`);
+  entries.sort(sortFn);
+
+  entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs }) => {
+    let refs = compactRowRefs.get(id);
+
+    if(!refs){
+      const row = document.createElement('div');
+      row.className = 'compact-row';
+
+      const main = document.createElement('div');
+      main.className = 'compact-row-main';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'compact-row-name';
+      const subEl = document.createElement('div');
+      subEl.className = 'compact-row-sub';
+      main.appendChild(nameEl);
+      main.appendChild(subEl);
+
+      const distEl = document.createElement('div');
+      distEl.className = 'compact-row-dist';
+
+      const controls = document.createElement('div');
+      controls.className = 'compact-row-controls';
+      const undoBtn = document.createElement('button');
+      undoBtn.className = 'compact-mini-btn undo';
+      undoBtn.textContent = '↺';
+      undoBtn.title = 'Undo';
+      const minusBtn = document.createElement('button');
+      minusBtn.className = 'compact-mini-btn';
+      minusBtn.textContent = '−50';
+      const plusBtn = document.createElement('button');
+      plusBtn.className = 'compact-mini-btn';
+      plusBtn.textContent = '+50';
+      controls.appendChild(undoBtn);
+      controls.appendChild(minusBtn);
+      controls.appendChild(plusBtn);
+
+      row.appendChild(main);
+      row.appendChild(distEl);
+      row.appendChild(controls);
+
+      refs = { row, nameEl, subEl, distEl, undoBtn, minusBtn, plusBtn };
+      compactRowRefs.set(id, refs);
+      compactList.appendChild(row);
+    }
+
+    refs.row.className = 'compact-row'
+      + (s.finished ? ' finished' : '')
+      + (s.finished && s.recordFlag ? ' record' : '')
+      + (isLastLap ? ' last-lap' : '')
+      + (inCooldown ? ' on-cooldown' : '')
+      + (notYetStarted ? ' not-started' : '');
+
+    refs.nameEl.textContent = `${s.name} ${s.surname}`;
+
+    if(s.finished && s.recordFlag){
+      refs.subEl.textContent = '🏆 New club record!';
+    } else if(s.finished){
+      refs.subEl.textContent = 'Finished';
+    } else if(notYetStarted){
+      refs.subEl.textContent = `Starts in ${Math.ceil(remainingDelayMs / 1000)}s`;
+    } else if(inCooldown){
+      refs.subEl.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
+    } else if(isLastLap){
+      refs.subEl.textContent = 'Last lap!';
+    } else {
+      refs.subEl.textContent = `${session.distance}m swim`;
+    }
+
+    if(s.finished){
+      refs.distEl.textContent = formatElapsed(s.finishTimeMs);
+    } else {
+      refs.distEl.innerHTML = `${s.remaining}<span class="unit">m</span>`;
+    }
+
+    if(!s.finished && !inCooldown && !notYetStarted){
+      refs.row.onclick = () => tapSwimmer(id, session.startTime, session.sessionId || session.startTime);
+    } else {
+      refs.row.onclick = null;
+    }
+
+    refs.undoBtn.disabled = !s.previousRemaining && s.previousRemaining !== 0;
+    refs.undoBtn.onclick = (e) => { e.stopPropagation(); undoLastTap(id); };
+    refs.minusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, -TAP_DECREMENT_M, session.startTime, session.sessionId || session.startTime); };
+    refs.plusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, TAP_DECREMENT_M, session.startTime, session.sessionId || session.startTime); };
+  });
+
+  const targetOrder = entries.map(e => e.id);
+  const orderUnchanged = targetOrder.length === compactLastOrder.length
+    && targetOrder.every((id, i) => id === compactLastOrder[i]);
+
+  if(orderUnchanged){
+    if(compactReorderDebounce) clearTimeout(compactReorderDebounce);
+    return;
+  }
+
+  if(compactReorderDebounce) clearTimeout(compactReorderDebounce);
+  compactReorderDebounce = setTimeout(() => {
+    entries.forEach(({ id }) => {
+      const refs = compactRowRefs.get(id);
+      if(refs) compactList.appendChild(refs.row);
+    });
+    compactLastOrder = targetOrder;
   }, 500);
 }
 
