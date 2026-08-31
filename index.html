@@ -166,13 +166,44 @@
     letter-spacing:.03em;
   }
 
-  .grid{
-    max-width:1100px;
+  .lanes-container{
+    max-width:1400px;
     margin:0 auto 40px;
-    padding:0 20px;
-    display:grid;
-    grid-template-columns:repeat(auto-fill,minmax(230px,1fr));
-    gap:14px;
+    padding:0 20px 10px;
+    display:flex;
+    gap:18px;
+    overflow-x:auto;
+    align-items:flex-start;
+    scroll-snap-type:x proximity;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .lane-column{
+    flex:0 0 240px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    scroll-snap-align:start;
+  }
+
+  .lane-header{
+    font-family:var(--font-display);
+    font-weight:600;
+    font-size:14px;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    padding:6px 4px;
+    border-bottom:2px solid rgba(242,193,78,0.35);
+    margin-bottom:2px;
+    position:sticky;
+    top:0;
+  }
+
+  .lane-cards{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
   }
 
   .card{
@@ -303,7 +334,8 @@
   }
 
   @media (max-width:480px){
-    .grid{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+    .lane-column{ flex-basis:82vw; max-width:300px; }
+    .lanes-container{ padding:0 16px 10px; gap:12px; }
     .remaining{ font-size:30px; }
   }
 </style>
@@ -343,7 +375,7 @@
   <a id="emptyStateLink" href="admin.html">Set up a session</a>
 </div>
 
-<section class="grid" id="swimmerGrid"></section>
+<section class="lanes-container" id="lanesContainer"></section>
 
 <footer>Tap a name after every 2 laps (50m) &middot; times lock automatically at zero &middot; card flashes red on the last lap<br><span style="opacity:.5; font-size:10px;">build v9-cooldown-fix</span></footer>
 
@@ -383,7 +415,7 @@ const masterClock          = document.getElementById('masterClock');
 const pauseBtn              = document.getElementById('pauseBtn');
 const pausedTag             = document.getElementById('pausedTag');
 const emptyState           = document.getElementById('emptyState');
-const swimmerGrid          = document.getElementById('swimmerGrid');
+const lanesContainer       = document.getElementById('lanesContainer');
 
 let clockInterval = null;
 let cooldownInterval = null;
@@ -413,8 +445,9 @@ sessionRef.on('value', snap => {
   if(!session || !session.active){
     sessionBar.classList.add('hidden');
     emptyState.classList.remove('hidden');
-    swimmerGrid.innerHTML = '';
+    lanesContainer.innerHTML = '';
     cardRefs.clear();
+    laneRefs.clear();
     lastRenderedOrder = [];
     if(reorderDebounce) clearTimeout(reorderDebounce);
     stopClock();
@@ -496,10 +529,11 @@ function formatElapsed(ms){
 }
 function pad(n){ return n.toString().padStart(2, '0'); }
 
-/* ---------- Swimmer grid ---------- */
+/* ---------- Swimmer grid (grouped into lane columns) ---------- */
 const cardRefs = new Map(); // swimmerId -> { card, tapArea, remainingEl, hint, nameEl, subEl, undoBtn }
+const laneRefs = new Map(); // laneKey -> { column, cardsContainer }
 let reorderDebounce = null;
-let lastRenderedOrder = []; // ids, in the order they were last physically arranged
+let lastRenderedOrder = []; // flat [laneKey, swimmerId] pairs, in last physically-arranged order
 
 function renderSwimmerGrid(session){
   const now = session.paused ? session.pausedAt : Date.now();
@@ -529,17 +563,58 @@ function renderSwimmerGrid(session){
     else if(inCooldown) sortRank = 1;
     else sortRank = 0;
 
-    return { id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs, sortRank };
+    const laneKey = s.lane ? String(s.lane) : 'unassigned';
+
+    return { id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs, sortRank, laneKey };
   });
 
-  if(bubbleSortEnabled){
-    entries.sort((a, b) => a.sortRank - b.sortRank);
-  } else {
-    // fixed order — alphabetical by name, never shuffles regardless of state
-    entries.sort((a, b) => `${a.s.name} ${a.s.surname}`.localeCompare(`${b.s.name} ${b.s.surname}`));
-  }
+  // group into lanes, ordered numerically (unassigned lane always last)
+  const laneKeys = [...new Set(entries.map(e => e.laneKey))].sort((a, b) => {
+    if(a === 'unassigned') return 1;
+    if(b === 'unassigned') return -1;
+    return Number(a) - Number(b);
+  });
 
-  entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs }) => {
+  // drop lane columns that no longer have any swimmers
+  [...laneRefs.keys()].forEach(key => {
+    if(!laneKeys.includes(key)){
+      laneRefs.get(key).column.remove();
+      laneRefs.delete(key);
+    }
+  });
+
+  // ensure a column exists for each lane, in the right left-to-right order
+  laneKeys.forEach(key => {
+    let laneEntry = laneRefs.get(key);
+    if(!laneEntry){
+      const column = document.createElement('div');
+      column.className = 'lane-column';
+      const header = document.createElement('div');
+      header.className = 'lane-header';
+      header.textContent = key === 'unassigned' ? 'Unassigned' : `Lane ${key}`;
+      const cardsContainer = document.createElement('div');
+      cardsContainer.className = 'lane-cards';
+      column.appendChild(header);
+      column.appendChild(cardsContainer);
+      laneEntry = { column, cardsContainer };
+      laneRefs.set(key, laneEntry);
+    }
+    lanesContainer.appendChild(laneEntry.column); // reorders columns left-to-right cheaply
+  });
+
+  // sort within each lane
+  const sortFn = bubbleSortEnabled
+    ? (a, b) => a.sortRank - b.sortRank
+    : (a, b) => `${a.s.name} ${a.s.surname}`.localeCompare(`${b.s.name} ${b.s.surname}`);
+
+  const entriesByLane = {};
+  laneKeys.forEach(key => { entriesByLane[key] = []; });
+  entries.forEach(e => entriesByLane[e.laneKey].push(e));
+  laneKeys.forEach(key => entriesByLane[key].sort(sortFn));
+
+  const flatEntries = laneKeys.flatMap(key => entriesByLane[key]);
+
+  flatEntries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs, laneKey }) => {
     let refs = cardRefs.get(id);
 
     if(!refs){
@@ -586,7 +661,8 @@ function renderSwimmerGrid(session){
 
       refs = { card, tapArea, nameEl, subEl, remainingEl, hint, undoBtn, minusBtn, plusBtn };
       cardRefs.set(id, refs);
-      swimmerGrid.appendChild(card); // new card — show it right away, ordering settles shortly after
+      const laneEntry = laneRefs.get(laneKey);
+      if(laneEntry) laneEntry.cardsContainer.appendChild(card); // new card — show it right away, ordering settles shortly after
     }
 
     // update classes
@@ -639,9 +715,9 @@ function renderSwimmerGrid(session){
   // physically moving cards is delayed briefly so a card can't shift position
   // out from under a coach's finger mid-tap (touchstart on card A, touchend
   // landing on nothing because the grid already reshuffled).
-  const targetOrder = entries.map(e => e.id);
+  const targetOrder = flatEntries.map(e => `${e.laneKey}:${e.id}`);
   const orderUnchanged = targetOrder.length === lastRenderedOrder.length
-    && targetOrder.every((id, i) => id === lastRenderedOrder[i]);
+    && targetOrder.every((key, i) => key === lastRenderedOrder[i]);
 
   if(orderUnchanged){
     // nothing actually needs to move — don't touch the DOM at all, so a
@@ -652,9 +728,10 @@ function renderSwimmerGrid(session){
 
   if(reorderDebounce) clearTimeout(reorderDebounce);
   reorderDebounce = setTimeout(() => {
-    entries.forEach(({ id }) => {
+    flatEntries.forEach(({ id, laneKey }) => {
       const refs = cardRefs.get(id);
-      if(refs) swimmerGrid.appendChild(refs.card);
+      const laneEntry = laneRefs.get(laneKey);
+      if(refs && laneEntry) laneEntry.cardsContainer.appendChild(refs.card);
     });
     lastRenderedOrder = targetOrder;
   }, 500);
