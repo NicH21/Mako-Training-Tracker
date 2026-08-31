@@ -215,6 +215,20 @@
       </label>
     </div>
 
+    <div class="setting-row">
+      <div class="setting-info">
+        <p class="setting-title">Bubble tappable swimmers to top</p>
+        <p class="setting-desc">
+          Automatically move swimmers who are ready to tap to the top of the board.
+          Turn off to keep everyone in a fixed, alphabetical order instead.
+        </p>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="bubbleToggle">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
     <p class="save-note" id="saveNote">Saved — applies live on the board.</p>
   </section>
 
@@ -237,6 +251,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 const cooldownToggle = document.getElementById('cooldownToggle');
+const bubbleToggle = document.getElementById('bubbleToggle');
 const saveNote = document.getElementById('saveNote');
 
 let loadedFromFirebase = false;
@@ -248,9 +263,22 @@ db.ref('settings/cooldownEnabled').on('value', snap => {
   loadedFromFirebase = true;
 });
 
+db.ref('settings/bubbleSortEnabled').on('value', snap => {
+  const enabled = snap.val();
+  // default to true (bubble sort ON) if never set before
+  bubbleToggle.checked = (enabled === null) ? true : !!enabled;
+});
+
 cooldownToggle.addEventListener('change', () => {
   if(!loadedFromFirebase) return;
   db.ref('settings/cooldownEnabled').set(cooldownToggle.checked).then(() => {
+    saveNote.classList.add('show');
+    setTimeout(() => saveNote.classList.remove('show'), 1800);
+  });
+});
+
+bubbleToggle.addEventListener('change', () => {
+  db.ref('settings/bubbleSortEnabled').set(bubbleToggle.checked).then(() => {
     saveNote.classList.add('show');
     setTimeout(() => saveNote.classList.remove('show'), 1800);
   });
