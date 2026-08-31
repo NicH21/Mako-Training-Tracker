@@ -289,6 +289,7 @@
     gap:10px;
     padding:10px 0;
     border-bottom:1px solid rgba(255,255,255,0.06);
+    flex-wrap:wrap;
   }
   .roster-manage-row:last-child{ border-bottom:none; }
   .roster-manage-name{
@@ -433,9 +434,13 @@
   <section class="panel">
     <h2>Import from Excel</h2>
     <p class="roster-empty" style="margin-bottom:14px;">
-      Upload an .xlsx or .csv file with columns <strong style="color:var(--foam); font-style:normal;">Name</strong>,
-      <strong style="color:var(--foam); font-style:normal;">Surname</strong>, and optionally
-      <strong style="color:var(--foam); font-style:normal;">Squad</strong> (header row required, any column order).
+      Upload an .xlsx or .csv file with columns <strong style="color:var(--foam); font-style:normal;">Name</strong> and
+      <strong style="color:var(--foam); font-style:normal;">Surname</strong> (required), plus any of
+      <strong style="color:var(--foam); font-style:normal;">Squad</strong>,
+      <strong style="color:var(--foam); font-style:normal;">Nick Name</strong>,
+      <strong style="color:var(--foam); font-style:normal;">DOB</strong>,
+      <strong style="color:var(--foam); font-style:normal;">Race</strong>, and
+      <strong style="color:var(--foam); font-style:normal;">Gender</strong> (all optional, header row required, any column order).
     </p>
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="color:var(--slate); font-size:13px;">
@@ -664,6 +669,24 @@ function renderRosterManageList(){
       squadInput.type = 'text';
       squadInput.placeholder = 'Squad';
       squadInput.value = s.squad || '';
+      const nickInput = document.createElement('input');
+      nickInput.type = 'text';
+      nickInput.placeholder = 'Nick name';
+      nickInput.value = s.nickName || '';
+      const dobInput = document.createElement('input');
+      dobInput.type = 'date';
+      dobInput.value = s.dob || '';
+      dobInput.style.width = '150px';
+      const raceInput = document.createElement('input');
+      raceInput.type = 'text';
+      raceInput.placeholder = 'Race';
+      raceInput.style.width = '90px';
+      raceInput.value = s.race || '';
+      const genderInput = document.createElement('input');
+      genderInput.type = 'text';
+      genderInput.placeholder = 'Gender';
+      genderInput.style.width = '90px';
+      genderInput.value = s.gender || '';
 
       const saveBtn = document.createElement('button');
       saveBtn.className = 'icon-btn save';
@@ -673,7 +696,15 @@ function renderRosterManageList(){
         const newSurname = surnameInput.value.trim();
         const newSquad = squadInput.value.trim();
         if(!newName || !newSurname) return;
-        db.ref(`roster/${id}`).update({ name: newName, surname: newSurname, squad: newSquad || null });
+        db.ref(`roster/${id}`).update({
+          name: newName,
+          surname: newSurname,
+          squad: newSquad || null,
+          nickName: nickInput.value.trim() || null,
+          dob: dobInput.value || null,
+          race: raceInput.value.trim() || null,
+          gender: genderInput.value.trim() || null
+        });
         editingId = null;
       };
 
@@ -685,16 +716,23 @@ function renderRosterManageList(){
       row.appendChild(nameInput);
       row.appendChild(surnameInput);
       row.appendChild(squadInput);
+      row.appendChild(nickInput);
+      row.appendChild(dobInput);
+      row.appendChild(raceInput);
+      row.appendChild(genderInput);
       row.appendChild(saveBtn);
       row.appendChild(cancelBtn);
     } else {
       const nameEl = document.createElement('div');
       nameEl.className = 'roster-manage-name';
-      nameEl.textContent = s.squad ? `${s.name} ${s.surname} · ${s.squad}` : `${s.name} ${s.surname}`;
+      const parts = [`${s.name} ${s.surname}`];
+      if(s.nickName) parts.push(`"${s.nickName}"`);
+      if(s.squad) parts.push(s.squad);
+      nameEl.textContent = parts.join(' · ');
 
       const editBtn = document.createElement('button');
       editBtn.className = 'icon-btn';
-      editBtn.textContent = 'Rename';
+      editBtn.textContent = 'Edit';
       editBtn.onclick = () => { editingId = id; renderRosterManageList(); };
 
       const deleteBtn = document.createElement('button');
@@ -735,6 +773,25 @@ const importResult      = document.getElementById('importResult');
 
 let parsedImportRows = [];
 
+// Excel/SheetJS may hand back a DOB as a JS Date object (if the cell is
+// date-formatted) or as plain text — normalize either to YYYY-MM-DD.
+function formatImportedDate(value){
+  if(!value) return '';
+  if(value instanceof Date && !isNaN(value)){
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(value).trim();
+  // normalize common separators (2012/01/05, 2012-01-05, 05/01/2012) to YYYY-MM-DD where possible
+  const isoMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if(isoMatch){
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+  }
+  return str; // leave as-is if format is unrecognized — still stored, just not reformatted
+}
+
 importFileInput.addEventListener('change', () => {
   importResult.textContent = '';
   importPreview.innerHTML = '';
@@ -757,12 +814,21 @@ importFileInput.addEventListener('change', () => {
         const keys = Object.keys(row);
         const findCol = (...names) => {
           const key = keys.find(k => names.includes(k.trim().toLowerCase()));
-          return key ? String(row[key]).trim() : '';
+          return key ? row[key] : '';
         };
+        const findColStr = (...names) => {
+          const val = findCol(...names);
+          return val === '' ? '' : String(val).trim();
+        };
+
         return {
-          name: findCol('name', 'first name', 'firstname'),
-          surname: findCol('surname', 'last name', 'lastname'),
-          squad: findCol('squad', 'group', 'team')
+          name: findColStr('name', 'first name', 'firstname'),
+          surname: findColStr('surname', 'last name', 'lastname'),
+          squad: findColStr('squad', 'group', 'team'),
+          nickName: findColStr('nick name', 'nickname', 'nick'),
+          dob: formatImportedDate(findCol('dob', 'date of birth', 'birthdate', 'birth date')),
+          race: findColStr('race'),
+          gender: findColStr('gender', 'sex')
         };
       }).filter(r => r.name && r.surname);
 
@@ -783,7 +849,7 @@ function renderImportPreview(){
 
   const previewRows = parsedImportRows.slice(0, 8).map(r =>
     `<div style="font-family:var(--font-mono); font-size:12px; padding:3px 0; color:var(--slate);">
-      ${r.name} ${r.surname}${r.squad ? ' · ' + r.squad : ''}
+      ${r.name} ${r.surname}${r.squad ? ' · ' + r.squad : ''}${r.dob ? ' · ' + r.dob : ''}${r.gender ? ' · ' + r.gender : ''}${r.race ? ' · ' + r.race : ''}
     </div>`
   ).join('');
 
@@ -805,7 +871,15 @@ importBtn.onclick = () => {
   const updates = {};
   parsedImportRows.forEach(r => {
     const newKey = db.ref('roster').push().key;
-    updates[newKey] = { name: r.name, surname: r.surname, squad: r.squad || null };
+    updates[newKey] = {
+      name: r.name,
+      surname: r.surname,
+      squad: r.squad || null,
+      nickName: r.nickName || null,
+      dob: r.dob || null,
+      race: r.race || null,
+      gender: r.gender || null
+    };
   });
 
   db.ref('roster').update(updates).then(() => {
