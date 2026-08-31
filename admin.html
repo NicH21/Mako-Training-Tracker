@@ -224,6 +224,34 @@
   }
   .delay-row-suffix{ font-size:12px; color:var(--slate); }
 
+  .toggle{
+    position:relative;
+    width:48px;
+    height:28px;
+    display:inline-block;
+  }
+  .toggle input{ opacity:0; width:0; height:0; }
+  .toggle-track{
+    position:absolute;
+    inset:0;
+    background:rgba(255,255,255,0.12);
+    border:1px solid rgba(255,255,255,0.2);
+    border-radius:999px;
+    cursor:pointer;
+    transition:background .15s ease, border-color .15s ease;
+  }
+  .toggle-track::before{
+    content:"";
+    position:absolute;
+    height:20px; width:20px;
+    left:3px; top:3px;
+    background:var(--foam);
+    border-radius:50%;
+    transition:transform .15s ease;
+  }
+  .toggle input:checked + .toggle-track{ background:var(--lane-rope); border-color:var(--lane-rope); }
+  .toggle input:checked + .toggle-track::before{ transform:translateX(20px); background:var(--pool-deep); }
+
   .active-notice{
     background:rgba(255,107,94,0.1);
     border:1px solid rgba(255,107,94,0.4);
@@ -350,6 +378,19 @@
     <div class="field">
       <label for="distanceInput">Distance (m)</label>
       <input type="number" id="distanceInput" placeholder="1500" step="50" min="50">
+    </div>
+
+    <div class="delay-row" style="border-bottom:none; margin-bottom:10px;">
+      <span class="delay-row-name">
+        Small device mode
+        <span style="display:block; font-size:12px; color:var(--slate); font-weight:400; margin-top:2px;">
+          Simple tap list instead of lane columns — easier to read on a phone
+        </span>
+      </span>
+      <label class="toggle" style="flex-shrink:0;">
+        <input type="checkbox" id="smallDeviceToggle">
+        <span class="toggle-track"></span>
+      </label>
     </div>
 
     <label style="display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--slate); margin-bottom:8px;">
@@ -820,6 +861,8 @@ endSessionBtn.onclick = () => {
 };
 
 /* ---------- Start session ---------- */
+const smallDeviceToggle = document.getElementById('smallDeviceToggle');
+
 startBtn.onclick = () => {
   const distance = parseInt(distanceInput.value, 10);
   const label = labelInput.value.trim();
@@ -844,6 +887,7 @@ startBtn.onclick = () => {
     label: label || null,
     startTime,
     sessionId,
+    compactMode: smallDeviceToggle.checked,
     active: true,
     paused: false,
     pausedAt: null,
