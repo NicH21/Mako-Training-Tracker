@@ -173,6 +173,20 @@
   }
   .save-note.show{ opacity:1; }
 
+  .danger-btn{
+    background:transparent;
+    border:1px solid rgba(255,107,94,0.4);
+    color:var(--coral);
+    font-family:var(--font-body);
+    font-size:13px;
+    font-weight:600;
+    padding:9px 16px;
+    border-radius:8px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .danger-btn:hover{ border-color:var(--coral); background:rgba(255,107,94,0.08); }
+
   footer{
     text-align:center;
     color:var(--slate);
@@ -232,6 +246,55 @@
     <p class="save-note" id="saveNote">Saved — applies live on the board.</p>
   </section>
 
+  <section class="panel" style="border-color:rgba(255,107,94,0.3);">
+    <h2 style="color:var(--coral);">Danger zone</h2>
+    <p class="setting-desc" style="margin-bottom:16px;">
+      These clear real data for everyone using the app. Mainly useful for wiping out test data before going live with a real squad.
+    </p>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <p class="setting-title">Clear all recorded times</p>
+        <p class="setting-desc">Removes every swim time, split, and club record. Roster stays intact.</p>
+      </div>
+      <button class="danger-btn" id="clearTimesBtn">Clear times</button>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <p class="setting-title">Clear session history</p>
+        <p class="setting-desc">Removes the Dashboard's "Session History" records of past sessions.</p>
+      </div>
+      <button class="danger-btn" id="clearHistoryBtn">Clear history</button>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <p class="setting-title">Clear swimmer roster</p>
+        <p class="setting-desc">Removes every swimmer's name and squad. Does not touch recorded times.</p>
+      </div>
+      <button class="danger-btn" id="clearRosterBtn">Clear roster</button>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <p class="setting-title">End all live sessions</p>
+        <p class="setting-desc">Force-ends any session currently running in any of the 5 slots.</p>
+      </div>
+      <button class="danger-btn" id="clearLiveBtn">End all</button>
+    </div>
+
+    <div class="setting-row" style="border-top:1px solid rgba(255,107,94,0.2); padding-top:20px; margin-top:6px;">
+      <div class="setting-info">
+        <p class="setting-title" style="color:var(--coral);">Reset everything</p>
+        <p class="setting-desc">Runs all four of the above at once — a full wipe back to an empty app.</p>
+      </div>
+      <button class="danger-btn" id="clearAllBtn" style="background:var(--coral); color:var(--pool-deep); border-color:var(--coral); font-weight:700;">Reset all</button>
+    </div>
+
+    <p class="save-note" id="dangerNote" style="color:var(--coral);"></p>
+  </section>
+
 </main>
 
 <footer>Settings apply instantly across every device viewing the live board.</footer>
@@ -283,6 +346,67 @@ bubbleToggle.addEventListener('change', () => {
     setTimeout(() => saveNote.classList.remove('show'), 1800);
   });
 });
+
+/* ---------- Danger zone ---------- */
+const NUM_SLOTS = 5;
+const DANGER_PASSWORD = '6767';
+const dangerNote = document.getElementById('dangerNote');
+
+function showDangerNote(text){
+  dangerNote.textContent = text;
+  setTimeout(() => { dangerNote.textContent = ''; }, 2500);
+}
+
+function checkDangerPassword(){
+  const entered = prompt('Enter the password to continue:');
+  if(entered === null) return false; // cancelled
+  if(entered !== DANGER_PASSWORD){
+    alert('Incorrect password.');
+    return false;
+  }
+  return true;
+}
+
+document.getElementById('clearTimesBtn').onclick = () => {
+  if(!checkDangerPassword()) return;
+  if(!confirm('Delete every recorded swim time, split, and club record? This cannot be undone.')) return;
+  db.ref('swimmerTimes').remove().then(() => showDangerNote('All recorded times cleared.'));
+};
+
+document.getElementById('clearHistoryBtn').onclick = () => {
+  if(!checkDangerPassword()) return;
+  if(!confirm('Delete all past session history from the Dashboard? This cannot be undone.')) return;
+  db.ref('completedSessions').remove().then(() => showDangerNote('Session history cleared.'));
+};
+
+document.getElementById('clearRosterBtn').onclick = () => {
+  if(!checkDangerPassword()) return;
+  if(!confirm('Delete every swimmer from the roster? Recorded times will stay but won\'t show a name. This cannot be undone.')) return;
+  db.ref('roster').remove().then(() => showDangerNote('Roster cleared.'));
+};
+
+document.getElementById('clearLiveBtn').onclick = () => {
+  if(!checkDangerPassword()) return;
+  if(!confirm('End every currently running session across all 5 slots? This cannot be undone.')) return;
+  const updates = {};
+  for(let i = 1; i <= NUM_SLOTS; i++){ updates[`liveSessions/${i}`] = null; }
+  db.ref().update(updates).then(() => showDangerNote('All live sessions ended.'));
+};
+
+document.getElementById('clearAllBtn').onclick = () => {
+  if(!checkDangerPassword()) return;
+  if(!confirm('This wipes EVERYTHING — roster, recorded times, session history, and any live sessions. There is no undo. Are you sure?')) return;
+  if(!confirm('Really sure? This is a full reset back to an empty app.')) return;
+
+  const updates = {
+    roster: null,
+    swimmerTimes: null,
+    completedSessions: null
+  };
+  for(let i = 1; i <= NUM_SLOTS; i++){ updates[`liveSessions/${i}`] = null; }
+
+  db.ref().update(updates).then(() => showDangerNote('Everything has been reset.'));
+};
 </script>
 </body>
 </html>
