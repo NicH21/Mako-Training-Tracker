@@ -355,6 +355,8 @@
         <button class="btn-ghost" id="exportSwimmerBtn">Export CSV</button>
       </div>
 
+      <div id="individualProfile" style="display:none; font-size:13px; color:var(--slate); margin:-8px 0 16px; display:flex; flex-wrap:wrap; gap:6px 14px;"></div>
+
       <div class="event-filter" id="individualEventFilter" style="margin-bottom:18px;"></div>
 
       <div class="stat-row">
@@ -593,12 +595,14 @@ function renderIndividual(id){
     panel.style.display = 'block';
     document.getElementById('individualHeading').textContent = swimmer ? `${swimmer.name} ${swimmer.surname}` : '—';
     document.getElementById('individualEventFilter').innerHTML = '';
+    renderIndividualProfile(swimmer);
     resetIndividualStats('No recorded swims yet');
     return;
   }
 
   panel.style.display = 'block';
   document.getElementById('individualHeading').textContent = `${swimmer.name} ${swimmer.surname}`;
+  renderIndividualProfile(swimmer);
 
   const swimmerEvents = [...new Set(allEntries.map(e => e.event))];
   renderIndividualEventFilter(swimmerEvents);
@@ -648,6 +652,44 @@ function renderIndividual(id){
     entries.map(e => ({ swimmer: `${swimmer.name} ${swimmer.surname}`, date: e.date, event: e.event, time: formatTime(e.timeMs) })),
     `${swimmer.name}_${swimmer.surname}_times.csv`
   );
+}
+
+function renderIndividualProfile(swimmer){
+  const el = document.getElementById('individualProfile');
+  if(!swimmer){
+    el.style.display = 'none';
+    return;
+  }
+
+  const chips = [];
+  if(swimmer.nickName) chips.push(`"${swimmer.nickName}"`);
+  if(swimmer.dob){
+    const age = calculateAge(swimmer.dob);
+    chips.push(age !== null ? `${age} yrs old` : swimmer.dob);
+  }
+  if(swimmer.gender) chips.push(swimmer.gender);
+  if(swimmer.race) chips.push(swimmer.race);
+  if(swimmer.squad) chips.push(swimmer.squad);
+
+  if(chips.length === 0){
+    el.style.display = 'none';
+    return;
+  }
+
+  el.style.display = 'flex';
+  el.innerHTML = chips.map(c => `<span>${c}</span>`).join('<span style="color:var(--lane-rope-dim);">·</span>');
+}
+
+function calculateAge(dobStr){
+  const dob = new Date(dobStr);
+  if(isNaN(dob)) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if(monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())){
+    age--;
+  }
+  return age;
 }
 
 function resetIndividualStats(message){
