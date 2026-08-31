@@ -276,6 +276,18 @@
   .compact-row.not-started{ opacity:.5; cursor:not-allowed; }
   .compact-row.last-lap{ animation: lastLapStrobe 1.6s ease-in-out infinite; }
 
+  .compact-lane-heading{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--lane-rope);
+    padding:14px 4px 4px;
+    border-bottom:1px solid rgba(242,193,78,0.25);
+    margin-bottom:2px;
+  }
+  .compact-lane-heading:first-child{ padding-top:0; }
+
   .compact-row-controls{
     display:flex;
     gap:5px;
@@ -541,6 +553,7 @@ sessionRef.on('value', snap => {
     if(reorderDebounce) clearTimeout(reorderDebounce);
     compactList.innerHTML = '';
     compactRowRefs.clear();
+    compactHeadingRefs.clear();
     compactLastOrder = [];
     if(compactReorderDebounce) clearTimeout(compactReorderDebounce);
     stopClock();
@@ -848,6 +861,7 @@ function renderSwimmerGrid(session){
 
 /* ---------- Compact list (small device mode) ---------- */
 const compactRowRefs = new Map(); // swimmerId -> { row, nameEl, subEl, distEl, undoBtn, minusBtn, plusBtn }
+const compactHeadingRefs = new Map(); // laneKey -> heading element
 let compactReorderDebounce = null;
 let compactLastOrder = [];
 
@@ -863,12 +877,38 @@ function renderCompactList(session){
 
   const entries = computeEntries(session);
 
+  // group into lanes, ordered numerically (unassigned lane always last) —
+  // same grouping rule as the full lane-column view
+  const laneKeys = [...new Set(entries.map(e => e.laneKey))].sort((a, b) => {
+    if(a === 'unassigned') return 1;
+    if(b === 'unassigned') return -1;
+    return Number(a) - Number(b);
+  });
+
+  // drop headings for lanes no longer present
+  [...compactHeadingRefs.keys()].forEach(key => {
+    if(!laneKeys.includes(key)){
+      compactHeadingRefs.get(key).remove();
+      compactHeadingRefs.delete(key);
+    }
+  });
+
+  // only show headings at all when there's more than one lane group —
+  // a single unassigned group would just be visual noise
+  const showHeadings = laneKeys.length > 1 || (laneKeys.length === 1 && laneKeys[0] !== 'unassigned');
+
   const sortFn = bubbleSortEnabled
     ? (a, b) => a.sortRank - b.sortRank
     : (a, b) => `${a.s.name} ${a.s.surname}`.localeCompare(`${b.s.name} ${b.s.surname}`);
-  entries.sort(sortFn);
 
-  entries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs }) => {
+  const entriesByLane = {};
+  laneKeys.forEach(key => { entriesByLane[key] = []; });
+  entries.forEach(e => entriesByLane[e.laneKey].push(e));
+  laneKeys.forEach(key => entriesByLane[key].sort(sortFn));
+
+  const flatEntries = laneKeys.flatMap(key => entriesByLane[key]);
+
+  flatEntries.forEach(({ id, s, isLastLap, inCooldown, remainingCooldownMs, notYetStarted, remainingDelayMs }) => {
     let refs = compactRowRefs.get(id);
 
     if(!refs){
@@ -953,9 +993,15 @@ function renderCompactList(session){
     refs.plusBtn.onclick = (e) => { e.stopPropagation(); adjustRemaining(id, TAP_DECREMENT_M, session.startTime, session.sessionId || session.startTime); };
   });
 
-  const targetOrder = entries.map(e => e.id);
+  // build the combined heading+row order, then skip entirely if unchanged
+  const targetOrder = [];
+  laneKeys.forEach(key => {
+    if(showHeadings) targetOrder.push(`heading:${key}`);
+    entriesByLane[key].forEach(e => targetOrder.push(`row:${e.id}`));
+  });
+
   const orderUnchanged = targetOrder.length === compactLastOrder.length
-    && targetOrder.every((id, i) => id === compactLastOrder[i]);
+    && targetOrder.every((key, i) => key === compactLastOrder[i]);
 
   if(orderUnchanged){
     if(compactReorderDebounce) clearTimeout(compactReorderDebounce);
@@ -964,9 +1010,21 @@ function renderCompactList(session){
 
   if(compactReorderDebounce) clearTimeout(compactReorderDebounce);
   compactReorderDebounce = setTimeout(() => {
-    entries.forEach(({ id }) => {
-      const refs = compactRowRefs.get(id);
-      if(refs) compactList.appendChild(refs.row);
+    laneKeys.forEach(key => {
+      if(showHeadings){
+        let heading = compactHeadingRefs.get(key);
+        if(!heading){
+          heading = document.createElement('div');
+          heading.className = 'compact-lane-heading';
+          heading.textContent = key === 'unassigned' ? 'Unassigned' : `Lane ${key}`;
+          compactHeadingRefs.set(key, heading);
+        }
+        compactList.appendChild(heading);
+      }
+      entriesByLane[key].forEach(({ id }) => {
+        const refs = compactRowRefs.get(id);
+        if(refs) compactList.appendChild(refs.row);
+      });
     });
     compactLastOrder = targetOrder;
   }, 500);
