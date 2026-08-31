@@ -367,7 +367,7 @@
 
     <div id="delayPanel" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.08);">
       <label style="display:block; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--slate); margin-bottom:8px;">
-        Send-off delays (seconds) — for staggered starts, e.g. group 2 at +5s, group 3 at +10s
+        Lanes &amp; send-off delays — assign a lane number (multiple swimmers can share one) and any staggered start, e.g. group 2 at +5s
       </label>
       <div id="delayList"></div>
     </div>
@@ -463,6 +463,7 @@ const delayPanel         = document.getElementById('delayPanel');
 const delayList          = document.getElementById('delayList');
 
 let swimmerDelays = {}; // swimmerId -> delay in seconds
+let swimmerLanes = {}; // swimmerId -> lane number (or '' if unassigned)
 
 let roster = {};
 let selectedIds = new Set();
@@ -525,9 +526,11 @@ function renderRosterPicker(){
       if(selectedIds.has(id)){
         selectedIds.delete(id);
         delete swimmerDelays[id];
+        delete swimmerLanes[id];
       } else {
         selectedIds.add(id);
         swimmerDelays[id] = swimmerDelays[id] || 0;
+        swimmerLanes[id] = swimmerLanes[id] || '';
       }
       renderRosterPicker();
       renderDelayList();
@@ -557,6 +560,22 @@ function renderDelayList(){
     nameEl.className = 'delay-row-name';
     nameEl.textContent = `${s.name} ${s.surname}`;
 
+    const laneInput = document.createElement('input');
+    laneInput.type = 'number';
+    laneInput.min = '1';
+    laneInput.step = '1';
+    laneInput.placeholder = '—';
+    laneInput.title = 'Lane number';
+    laneInput.style.width = '54px';
+    laneInput.value = swimmerLanes[id] || '';
+    laneInput.oninput = () => {
+      const val = parseInt(laneInput.value, 10);
+      swimmerLanes[id] = isNaN(val) || val < 1 ? '' : String(val);
+    };
+    const laneSuffix = document.createElement('span');
+    laneSuffix.className = 'delay-row-suffix';
+    laneSuffix.textContent = 'lane';
+
     const input = document.createElement('input');
     input.type = 'number';
     input.min = '0';
@@ -572,6 +591,8 @@ function renderDelayList(){
     suffix.textContent = 's after start';
 
     row.appendChild(nameEl);
+    row.appendChild(laneInput);
+    row.appendChild(laneSuffix);
     row.appendChild(input);
     row.appendChild(suffix);
     delayList.appendChild(row);
@@ -813,7 +834,8 @@ startBtn.onclick = () => {
       remaining: distance,
       finished: false,
       finishTimeMs: null,
-      startDelayMs: (swimmerDelays[id] || 0) * 1000
+      startDelayMs: (swimmerDelays[id] || 0) * 1000,
+      lane: swimmerLanes[id] || null
     };
   });
 
