@@ -425,7 +425,10 @@
     <section class="panel" id="sessionDetailPanel" style="display:none;">
       <div class="panel-header-row">
         <h2 id="sessionDetailHeading">—</h2>
-        <button class="btn-ghost" id="backToSessionListBtn">← All sessions</button>
+        <div style="display:flex; gap:8px;">
+          <button class="row-delete" id="deleteSessionDetailBtn">Delete session</button>
+          <button class="btn-ghost" id="backToSessionListBtn">← All sessions</button>
+        </div>
       </div>
       <table>
         <thead>
@@ -1094,19 +1097,45 @@ function renderSessionHistoryList(){
     const row = document.createElement('div');
     row.className = 'leaderboard-row';
     row.style.cursor = 'pointer';
-    row.innerHTML = `
-      <div class="leaderboard-rank">🏊</div>
-      <div class="leaderboard-name">${escapeHtml(label)}<span class="leaderboard-sub">${session.distance}m · ${finishedCount}/${swimmers.length} finished</span></div>
-      <div class="leaderboard-time" style="font-size:13px;">${formatDate(session.date)}</div>
-    `;
+
+    const rank = document.createElement('div');
+    rank.className = 'leaderboard-rank';
+    rank.textContent = '🏊';
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'leaderboard-name';
+    nameDiv.innerHTML = `${escapeHtml(label)}<span class="leaderboard-sub">${session.distance}m · ${finishedCount}/${swimmers.length} finished</span>`;
+
+    const dateDiv = document.createElement('div');
+    dateDiv.className = 'leaderboard-time';
+    dateDiv.style.fontSize = '13px';
+    dateDiv.textContent = formatDate(session.date);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'row-delete';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.style.marginLeft = '10px';
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      if(!confirm(`Delete "${label}" from session history? This cannot be undone.`)) return;
+      db.ref(`completedSessions/${sid}`).remove();
+    };
+
+    row.appendChild(rank);
+    row.appendChild(nameDiv);
+    row.appendChild(dateDiv);
+    row.appendChild(deleteBtn);
     row.onclick = () => showSessionDetail(sid);
     list.appendChild(row);
   });
 }
 
+let currentDetailSid = null;
+
 function showSessionDetail(sid){
   const session = completedSessions[sid];
   if(!session) return;
+  currentDetailSid = sid;
 
   document.getElementById('sessionListPanel').style.display = 'none';
   document.getElementById('sessionDetailPanel').style.display = 'block';
@@ -1148,6 +1177,17 @@ function showSessionDetail(sid){
 document.getElementById('backToSessionListBtn').onclick = () => {
   document.getElementById('sessionDetailPanel').style.display = 'none';
   document.getElementById('sessionListPanel').style.display = 'block';
+};
+
+document.getElementById('deleteSessionDetailBtn').onclick = () => {
+  if(!currentDetailSid) return;
+  const session = completedSessions[currentDetailSid];
+  const label = session ? (session.label || `Session ${session.slot || ''}`) : 'this session';
+  if(!confirm(`Delete "${label}" from session history? This cannot be undone.`)) return;
+  db.ref(`completedSessions/${currentDetailSid}`).remove().then(() => {
+    document.getElementById('sessionDetailPanel').style.display = 'none';
+    document.getElementById('sessionListPanel').style.display = 'block';
+  });
 };
 
 function escapeHtml(str){
