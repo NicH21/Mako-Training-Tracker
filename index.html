@@ -595,7 +595,12 @@ sessionRef.on('value', snap => {
 function startCooldownTicker(){
   if(cooldownInterval) return;
   cooldownInterval = setInterval(() => {
-    if(currentSession) renderSwimmerGrid(currentSession);
+    if(!currentSession) return;
+    if(currentSession.compactMode){
+      renderCompactList(currentSession);
+    } else {
+      renderSwimmerGrid(currentSession);
+    }
   }, 1000);
 }
 function stopCooldownTicker(){
