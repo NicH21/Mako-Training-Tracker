@@ -443,7 +443,12 @@
   <section class="view" id="viewRecords">
     <section class="panel">
       <h2>Club records</h2>
-      <p class="empty-note" style="margin-bottom:16px;">Fastest time ever recorded, per event, across every swimmer and session.</p>
+      <p class="empty-note" style="margin-bottom:16px;">Fastest time ever recorded, per event — filter by squad, gender, or age.</p>
+
+      <div id="recordsSquadFilter" class="event-filter" style="margin-bottom:10px;"></div>
+      <div id="recordsGenderFilter" class="event-filter" style="margin-bottom:10px;"></div>
+      <div id="recordsAgeFilter" class="event-filter" style="margin-bottom:16px;"></div>
+
       <div id="recordsList"></div>
     </section>
   </section>
@@ -1040,12 +1045,97 @@ function renderLeaderboard(){
 }
 
 /* ---------- Club records ---------- */
+let selectedRecordSquad = null; // null = All squads
+let selectedRecordGender = null; // null = All genders
+let selectedRecordAge = null; // null = All ages
+
+function matchesRecordFilters(swimmer){
+  if(!swimmer) return false;
+  if(selectedRecordSquad && swimmer.squad !== selectedRecordSquad) return false;
+  if(selectedRecordGender && swimmer.gender !== selectedRecordGender) return false;
+  if(selectedRecordAge !== null){
+    const age = swimmer.dob ? calculateAge(swimmer.dob) : null;
+    if(age !== selectedRecordAge) return false;
+  }
+  return true;
+}
+
+function renderRecordsFilters(){
+  // Squad filter
+  const squads = [...new Set(Object.values(roster).map(s => s.squad).filter(Boolean))].sort();
+  const squadFilter = document.getElementById('recordsSquadFilter');
+  if(squads.length === 0){
+    squadFilter.innerHTML = '';
+  } else {
+    squadFilter.innerHTML = '';
+    const allChip = document.createElement('button');
+    allChip.className = 'event-chip' + (selectedRecordSquad === null ? ' selected' : '');
+    allChip.textContent = 'All squads';
+    allChip.onclick = () => { selectedRecordSquad = null; renderRecordsFilters(); renderRecords(); };
+    squadFilter.appendChild(allChip);
+    squads.forEach(sq => {
+      const chip = document.createElement('button');
+      chip.className = 'event-chip' + (sq === selectedRecordSquad ? ' selected' : '');
+      chip.textContent = sq;
+      chip.onclick = () => { selectedRecordSquad = sq; renderRecordsFilters(); renderRecords(); };
+      squadFilter.appendChild(chip);
+    });
+  }
+
+  // Gender filter
+  const genders = [...new Set(Object.values(roster).map(s => s.gender).filter(Boolean))].sort();
+  const genderFilter = document.getElementById('recordsGenderFilter');
+  if(genders.length === 0){
+    genderFilter.innerHTML = '';
+  } else {
+    genderFilter.innerHTML = '';
+    const allChip = document.createElement('button');
+    allChip.className = 'event-chip' + (selectedRecordGender === null ? ' selected' : '');
+    allChip.textContent = 'All genders';
+    allChip.onclick = () => { selectedRecordGender = null; renderRecordsFilters(); renderRecords(); };
+    genderFilter.appendChild(allChip);
+    genders.forEach(g => {
+      const chip = document.createElement('button');
+      chip.className = 'event-chip' + (g === selectedRecordGender ? ' selected' : '');
+      chip.textContent = g;
+      chip.onclick = () => { selectedRecordGender = g; renderRecordsFilters(); renderRecords(); };
+      genderFilter.appendChild(chip);
+    });
+  }
+
+  // Age filter — computed live from DOB, so it's always current
+  const ages = [...new Set(
+    Object.values(roster).map(s => s.dob ? calculateAge(s.dob) : null).filter(a => a !== null)
+  )].sort((a, b) => a - b);
+  const ageFilter = document.getElementById('recordsAgeFilter');
+  if(ages.length === 0){
+    ageFilter.innerHTML = '';
+  } else {
+    ageFilter.innerHTML = '';
+    const allChip = document.createElement('button');
+    allChip.className = 'event-chip' + (selectedRecordAge === null ? ' selected' : '');
+    allChip.textContent = 'All ages';
+    allChip.onclick = () => { selectedRecordAge = null; renderRecordsFilters(); renderRecords(); };
+    ageFilter.appendChild(allChip);
+    ages.forEach(age => {
+      const chip = document.createElement('button');
+      chip.className = 'event-chip' + (age === selectedRecordAge ? ' selected' : '');
+      chip.textContent = `${age}yr`;
+      chip.onclick = () => { selectedRecordAge = age; renderRecordsFilters(); renderRecords(); };
+      ageFilter.appendChild(chip);
+    });
+  }
+}
+
 function renderRecords(){
+  renderRecordsFilters();
+
   const list = document.getElementById('recordsList');
   const recordsByEvent = {}; // event -> { id, timeMs, date }
 
   Object.entries(allTimes).forEach(([id, entries]) => {
-    if(!roster[id]) return;
+    const swimmer = roster[id];
+    if(!matchesRecordFilters(swimmer)) return;
     Object.values(entries || {}).forEach(e => {
       if(e.cancelled) return;
       if(!recordsByEvent[e.event] || e.timeMs < recordsByEvent[e.event].timeMs){
@@ -1057,7 +1147,7 @@ function renderRecords(){
   const events = Object.keys(recordsByEvent).sort((a, b) => parseInt(a) - parseInt(b));
 
   if(events.length === 0){
-    list.innerHTML = '<p class="empty-note">No recorded swims yet.</p>';
+    list.innerHTML = '<p class="empty-note">No recorded swims match this filter.</p>';
     return;
   }
 
