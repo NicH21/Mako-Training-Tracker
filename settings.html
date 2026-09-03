@@ -243,6 +243,23 @@
       </label>
     </div>
 
+    <div class="setting-row">
+      <div class="setting-info">
+        <p class="setting-title">Auto-count missed taps</p>
+        <p class="setting-desc">
+          If a swimmer has swum this exact distance before, and a coach clearly forgets to tap
+          them (well past their own usual pace), the app logs a lap on their behalf using their
+          expected time — not the late clock time. Every auto-logged tap is clearly flagged so
+          you can check and Undo it if it's wrong. Only works for swimmers with prior history at
+          this distance — no history means no guessing.
+        </p>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="autoCountToggle">
+        <span class="toggle-track"></span>
+      </label>
+    </div>
+
     <p class="save-note" id="saveNote">Saved — applies live on the board.</p>
   </section>
 
@@ -315,6 +332,7 @@ const db = firebase.database();
 
 const cooldownToggle = document.getElementById('cooldownToggle');
 const bubbleToggle = document.getElementById('bubbleToggle');
+const autoCountToggle = document.getElementById('autoCountToggle');
 const saveNote = document.getElementById('saveNote');
 
 let loadedFromFirebase = false;
@@ -332,9 +350,22 @@ db.ref('settings/bubbleSortEnabled').on('value', snap => {
   bubbleToggle.checked = (enabled === null) ? true : !!enabled;
 });
 
+db.ref('settings/autoCountEnabled').on('value', snap => {
+  const enabled = snap.val();
+  // default to false (OFF) — this changes recorded data, opt-in only
+  autoCountToggle.checked = !!enabled;
+});
+
 cooldownToggle.addEventListener('change', () => {
   if(!loadedFromFirebase) return;
   db.ref('settings/cooldownEnabled').set(cooldownToggle.checked).then(() => {
+    saveNote.classList.add('show');
+    setTimeout(() => saveNote.classList.remove('show'), 1800);
+  });
+});
+
+autoCountToggle.addEventListener('change', () => {
+  db.ref('settings/autoCountEnabled').set(autoCountToggle.checked).then(() => {
     saveNote.classList.add('show');
     setTimeout(() => saveNote.classList.remove('show'), 1800);
   });
