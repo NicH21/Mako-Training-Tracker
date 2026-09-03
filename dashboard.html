@@ -8,6 +8,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 
 <style>
   :root{
@@ -354,7 +355,7 @@
         <h2 id="individualHeading">—</h2>
         <div style="display:flex; gap:8px;">
           <button class="btn-ghost" id="addManualTimeBtn">+ Add manual time</button>
-          <button class="btn-ghost" id="exportSwimmerBtn">Export CSV</button>
+          <button class="btn-ghost" id="exportSwimmerBtn">Export Excel report</button>
         </div>
       </div>
 
@@ -428,7 +429,7 @@
     <section class="panel">
       <div class="panel-header-row">
         <h2>Event</h2>
-        <button class="btn-ghost" id="exportSquadBtn">Export all as CSV</button>
+        <button class="btn-ghost" id="exportSquadBtn">Export squad Excel report</button>
       </div>
       <div class="event-filter" id="eventFilter"></div>
       <div class="chart-wrap"><canvas id="squadChart"></canvas></div>
@@ -686,10 +687,7 @@ function renderIndividual(id){
   renderIndividualChart(entries);
   renderHistoryTable(entries, best.entryId);
 
-  document.getElementById('exportSwimmerBtn').onclick = () => exportCsv(
-    entries.map(e => ({ swimmer: `${swimmer.name} ${swimmer.surname}`, date: e.date, event: e.event, time: formatTime(e.timeMs) })),
-    `${swimmer.name}_${swimmer.surname}_times.csv`
-  );
+  document.getElementById('exportSwimmerBtn').onclick = () => exportSwimmerExcel(swimmer, entries, best.entryId);
 }
 
 /* ---------- Manual time entry (for pre-app swims) ---------- */
@@ -1010,18 +1008,7 @@ function renderEventFilter(){
     filter.appendChild(chip);
   });
 
-  document.getElementById('exportSquadBtn').onclick = () => {
-    const rows = [];
-    Object.entries(allTimes).forEach(([id, entries]) => {
-      const swimmer = roster[id];
-      if(!swimmer) return;
-      Object.values(entries || {}).forEach(e => {
-        if(e.cancelled) return;
-        rows.push({ swimmer: `${swimmer.name} ${swimmer.surname}`, date: e.date, event: e.event, time: formatTime(e.timeMs) });
-      });
-    });
-    exportCsv(rows, 'squad_all_times.csv');
-  };
+  document.getElementById('exportSquadBtn').onclick = () => exportSquadExcel();
 }
 
 function renderSquadChart(){
@@ -1392,21 +1379,155 @@ function escapeHtml(str){
   return div.innerHTML;
 }
 
-/* ---------- CSV export helper ---------- */
-function exportCsv(rows, filename){
-  if(rows.length === 0) return;
-  const headers = Object.keys(rows[0]);
-  const csvLines = [
-    headers.join(','),
-    ...rows.map(r => headers.map(h => `"${String(r[h]).replace(/"/g, '""')}"`).join(','))
-  ];
-  const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' });
+/* ---------- Excel report export ---------- */
+const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D2C3F' } };
+const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+const TITLE_FONT = { bold: true, size: 16, color: { argb: 'FF0D2C3F' } };
+const SUB_FONT = { size: 10, color: { argb: 'FF5C7A8A' } };
+const THIN_BORDER = { style: 'thin', color: { argb: 'FFD9D9D9' } };
+const PB_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
+
+function styleHeaderRow(row){
+  row.eachCell(cell => {
+    cell.fill = HEADER_FILL;
+    cell.font = HEADER_FONT;
+    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    cell.border = { top: THIN_BORDER, bottom: THIN_BORDER, left: THIN_BORDER, right: THIN_BORDER };
+  });
+  row.height = 20;
+}
+
+function styleDataRow(row){
+  row.eachCell(cell => {
+    cell.border = { top: THIN_BORDER, bottom: THIN_BORDER, left: THIN_BORDER, right: THIN_BORDER };
+    cell.alignment = { vertical: 'middle' };
+  });
+}
+
+async function downloadWorkbook(workbook, filename){
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function exportSwimmerExcel(swimmer, entries, bestEntryId){
+  if(entries.length === 0) return;
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Squad Timer';
+  workbook.created = new Date();
+
+  const ws = workbook.addWorksheet('Swim History', { views: [{ state: 'frozen', ySplit: 4 }] });
+  ws.columns = [
+    { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }
+  ];
+
+  ws.mergeCells('A1:D1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = `${swimmer.name} ${swimmer.surname}`;
+  titleCell.font = TITLE_FONT;
+  ws.getRow(1).height = 26;
+
+  ws.mergeCells('A2:D2');
+  const subCell = ws.getCell('A2');
+  const chipParts = [];
+  if(swimmer.squad) chipParts.push(swimmer.squad);
+  if(swimmer.dob) chipParts.push(`${calculateAge(swimmer.dob)} yrs`);
+  if(swimmer.gender) chipParts.push(swimmer.gender);
+  subCell.value = chipParts.length ? chipParts.join(' · ') + ` · Exported ${formatDate(new Date().toISOString())}` : `Exported ${formatDate(new Date().toISOString())}`;
+  subCell.font = SUB_FONT;
+
+  ws.addRow([]); // spacer row 3
+
+  const headerRow = ws.addRow(['Date', 'Event', 'Time', 'Change']);
+  styleHeaderRow(headerRow);
+
+  const sorted = [...entries].reverse(); // most recent first, matches on-screen table
+  sorted.forEach((e, i) => {
+    const prevEntry = sorted[i + 1];
+    let changeStr = '—';
+    if(prevEntry){
+      const deltaMs = e.timeMs - prevEntry.timeMs;
+      changeStr = `${deltaMs < 0 ? '-' : '+'}${formatTime(Math.abs(deltaMs))}`;
+    }
+    const row = ws.addRow([formatDate(e.date), e.event, formatTime(e.timeMs) + (e.manualEntry ? ' (manual)' : ''), changeStr]);
+    styleDataRow(row);
+    if(e.entryId === bestEntryId){
+      row.eachCell(cell => { cell.fill = PB_FILL; });
+    }
+  });
+
+  // Embed a snapshot of the currently-displayed chart, if there is one
+  if(individualChart){
+    const imgDataUrl = individualChart.canvas.toDataURL('image/png');
+    const imageId = workbook.addImage({ base64: imgDataUrl, extension: 'png' });
+    const chartStartRow = ws.rowCount + 2;
+    ws.getCell(`A${chartStartRow - 1}`).value = 'Time trend';
+    ws.getCell(`A${chartStartRow - 1}`).font = { bold: true, size: 12, color: { argb: 'FF0D2C3F' } };
+    ws.addImage(imageId, {
+      tl: { col: 0, row: chartStartRow },
+      ext: { width: 560, height: 280 }
+    });
+  }
+
+  await downloadWorkbook(workbook, `${swimmer.name}_${swimmer.surname}_report.xlsx`);
+}
+
+async function exportSquadExcel(){
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Squad Timer';
+  workbook.created = new Date();
+
+  const ws = workbook.addWorksheet('Squad Times', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.columns = [
+    { width: 22 }, { width: 14 }, { width: 22 }, { width: 12 }, { width: 14 }
+  ];
+
+  const headerRow = ws.addRow(['Swimmer', 'Squad', 'Date', 'Event', 'Time']);
+  styleHeaderRow(headerRow);
+
+  const rows = [];
+  Object.entries(allTimes).forEach(([id, entries]) => {
+    const swimmer = roster[id];
+    if(!swimmer) return;
+    Object.values(entries || {}).forEach(e => {
+      if(e.cancelled) return;
+      rows.push({
+        name: `${swimmer.name} ${swimmer.surname}`,
+        squad: swimmer.squad || '',
+        date: e.date,
+        event: e.event,
+        timeMs: e.timeMs,
+        manual: !!e.manualEntry
+      });
+    });
+  });
+  rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  rows.forEach(r => {
+    const row = ws.addRow([r.name, r.squad, formatDate(r.date), r.event, formatTime(r.timeMs) + (r.manual ? ' (manual)' : '')]);
+    styleDataRow(row);
+  });
+
+  // Embed the currently-selected squad comparison chart, if one is showing
+  if(squadChart && selectedEvent){
+    const imgDataUrl = squadChart.canvas.toDataURL('image/png');
+    const imageId = workbook.addImage({ base64: imgDataUrl, extension: 'png' });
+    const chartSheet = workbook.addWorksheet('Chart');
+    chartSheet.getCell('A1').value = `Squad comparison — ${selectedEvent}`;
+    chartSheet.getCell('A1').font = TITLE_FONT;
+    chartSheet.addImage(imageId, {
+      tl: { col: 0, row: 2 },
+      ext: { width: 700, height: 380 }
+    });
+  }
+
+  await downloadWorkbook(workbook, 'squad_times_report.xlsx');
 }
 
 /* ---------- Helpers ---------- */
