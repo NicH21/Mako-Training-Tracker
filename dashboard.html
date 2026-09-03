@@ -352,10 +352,40 @@
     <section class="panel" id="individualPanel" style="display:none;">
       <div class="panel-header-row">
         <h2 id="individualHeading">—</h2>
-        <button class="btn-ghost" id="exportSwimmerBtn">Export CSV</button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-ghost" id="addManualTimeBtn">+ Add manual time</button>
+          <button class="btn-ghost" id="exportSwimmerBtn">Export CSV</button>
+        </div>
       </div>
 
       <div id="individualProfile" style="display:none; font-size:13px; color:var(--slate); margin:-8px 0 16px; display:flex; flex-wrap:wrap; gap:6px 14px;"></div>
+
+      <div id="manualTimePanel" style="display:none; background:var(--pool-deep); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:16px; margin-bottom:16px;">
+        <p style="font-size:13px; color:var(--slate); margin:0 0 12px;">For a swim recorded before this system existed — enter what you know.</p>
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+          <div style="margin-bottom:0;">
+            <label style="display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--slate); margin-bottom:6px;">Date</label>
+            <input type="date" id="manualDate" style="font-size:14px; padding:8px 10px; background:var(--pool-mid); border:1px solid rgba(255,255,255,0.15); color:var(--foam); border-radius:7px; font-family:var(--font-mono);">
+          </div>
+          <div style="margin-bottom:0;">
+            <label style="display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--slate); margin-bottom:6px;">Distance (m)</label>
+            <input type="number" id="manualDistance" placeholder="1500" step="50" min="1" style="width:100px; font-size:14px; padding:8px 10px; background:var(--pool-mid); border:1px solid rgba(255,255,255,0.15); color:var(--foam); border-radius:7px; font-family:var(--font-mono);">
+          </div>
+          <div style="margin-bottom:0;">
+            <label style="display:block; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--slate); margin-bottom:6px;">Time</label>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <input type="number" id="manualMin" placeholder="mm" min="0" style="width:56px; font-size:14px; padding:8px 8px; text-align:center; background:var(--pool-mid); border:1px solid rgba(255,255,255,0.15); color:var(--foam); border-radius:7px; font-family:var(--font-mono);">
+              <span style="color:var(--slate);">:</span>
+              <input type="number" id="manualSec" placeholder="ss" min="0" max="59" style="width:56px; font-size:14px; padding:8px 8px; text-align:center; background:var(--pool-mid); border:1px solid rgba(255,255,255,0.15); color:var(--foam); border-radius:7px; font-family:var(--font-mono);">
+              <span style="color:var(--slate);">.</span>
+              <input type="number" id="manualCenti" placeholder="cc" min="0" max="99" style="width:56px; font-size:14px; padding:8px 8px; text-align:center; background:var(--pool-mid); border:1px solid rgba(255,255,255,0.15); color:var(--foam); border-radius:7px; font-family:var(--font-mono);">
+            </div>
+          </div>
+          <button class="btn-ghost" id="saveManualTimeBtn">Save</button>
+          <button class="btn-ghost" id="cancelManualTimeBtn">Cancel</button>
+        </div>
+        <p id="manualTimeError" style="color:var(--coral); font-size:12px; margin:10px 0 0; display:none;"></p>
+      </div>
 
       <div class="event-filter" id="individualEventFilter" style="margin-bottom:18px;"></div>
 
@@ -662,6 +692,74 @@ function renderIndividual(id){
   );
 }
 
+/* ---------- Manual time entry (for pre-app swims) ---------- */
+const manualTimePanel  = document.getElementById('manualTimePanel');
+const manualTimeError  = document.getElementById('manualTimeError');
+
+document.getElementById('addManualTimeBtn').onclick = () => {
+  manualTimeError.style.display = 'none';
+  const isOpen = manualTimePanel.style.display === 'block';
+  manualTimePanel.style.display = isOpen ? 'none' : 'block';
+  if(!isOpen){
+    // default to today, nothing else pre-filled
+    document.getElementById('manualDate').value = new Date().toISOString().slice(0, 10);
+  }
+};
+
+document.getElementById('cancelManualTimeBtn').onclick = () => {
+  manualTimePanel.style.display = 'none';
+  manualTimeError.style.display = 'none';
+};
+
+document.getElementById('saveManualTimeBtn').onclick = () => {
+  manualTimeError.style.display = 'none';
+
+  if(!selectedSwimmerId){
+    manualTimeError.textContent = 'Choose a swimmer first.';
+    manualTimeError.style.display = 'block';
+    return;
+  }
+
+  const dateVal = document.getElementById('manualDate').value;
+  const distance = parseInt(document.getElementById('manualDistance').value, 10);
+  const min = parseInt(document.getElementById('manualMin').value, 10) || 0;
+  const sec = parseInt(document.getElementById('manualSec').value, 10) || 0;
+  const centi = parseInt(document.getElementById('manualCenti').value, 10) || 0;
+
+  if(!dateVal){
+    manualTimeError.textContent = 'Enter a date.';
+    manualTimeError.style.display = 'block';
+    return;
+  }
+  if(!distance || distance <= 0){
+    manualTimeError.textContent = 'Enter a valid distance.';
+    manualTimeError.style.display = 'block';
+    return;
+  }
+  const timeMs = (min * 60 * 1000) + (sec * 1000) + (centi * 10);
+  if(timeMs <= 0){
+    manualTimeError.textContent = 'Enter a time greater than zero.';
+    manualTimeError.style.display = 'block';
+    return;
+  }
+
+  const entry = {
+    date: new Date(dateVal + 'T12:00:00').toISOString(), // noon avoids timezone date-shift issues
+    event: `${distance}m`,
+    timeMs,
+    splits: [],
+    manualEntry: true
+  };
+
+  db.ref(`swimmerTimes/${selectedSwimmerId}`).push(entry).then(() => {
+    manualTimePanel.style.display = 'none';
+    document.getElementById('manualDistance').value = '';
+    document.getElementById('manualMin').value = '';
+    document.getElementById('manualSec').value = '';
+    document.getElementById('manualCenti').value = '';
+  });
+};
+
 function renderIndividualProfile(swimmer){
   const el = document.getElementById('individualProfile');
   if(!swimmer){
@@ -796,6 +894,14 @@ function renderHistoryTable(entries, bestEntryId){
       const badge = document.createElement('span');
       badge.className = 'pb-badge';
       badge.textContent = 'PB';
+      timeCell.appendChild(badge);
+    }
+    if(e.manualEntry){
+      const badge = document.createElement('span');
+      badge.className = 'pb-badge';
+      badge.style.background = 'var(--slate)';
+      badge.style.color = 'var(--pool-deep)';
+      badge.textContent = 'Manual';
       timeCell.appendChild(badge);
     }
 
