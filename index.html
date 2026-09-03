@@ -380,6 +380,21 @@
   .card.record .remaining{ color:var(--lane-rope); font-size:30px; }
   .card.record .tap-hint{ color:var(--lane-rope); font-weight:700; }
 
+  .auto-badge{
+    display:inline-block;
+    background:rgba(127,179,213,0.18);
+    color:#7fb3d5;
+    border:1px solid rgba(127,179,213,0.4);
+    font-family:var(--font-mono);
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.03em;
+    padding:2px 7px;
+    border-radius:5px;
+    margin-left:6px;
+    text-transform:uppercase;
+  }
+
   .card.on-cooldown .tap-area{
     cursor:not-allowed;
     opacity:.55;
@@ -525,6 +540,7 @@ let currentSession = null;
 const COOLDOWN_MS = 15000; // 15s lockout on a swimmer's card after each tap, shared across every device
 let cooldownEnabled = true; // default on; overridden by /settings/cooldownEnabled
 let bubbleSortEnabled = true; // default on; overridden by /settings/bubbleSortEnabled
+let autoCountEnabled = false; // default OFF; overridden by /settings/autoCountEnabled
 
 db.ref('settings/cooldownEnabled').on('value', snap => {
   const val = snap.val();
@@ -537,6 +553,53 @@ db.ref('settings/bubbleSortEnabled').on('value', snap => {
   bubbleSortEnabled = (val === null) ? true : !!val;
   if(currentSession) renderSwimmerGrid(currentSession);
 });
+
+db.ref('settings/autoCountEnabled').on('value', snap => {
+  autoCountEnabled = !!snap.val();
+});
+
+// Historical swim times, kept only for computing each swimmer's average pace
+// per event — used to detect a likely-missed tap. Not used for anything else.
+let allSwimTimes = {};
+db.ref('swimmerTimes').on('value', snap => {
+  allSwimTimes = snap.val() || {};
+});
+
+// Average time (ms) per 50m lap for this swimmer, based only on their own
+// past swims of this exact distance. Returns null if there's no history —
+// auto-count never guesses from nothing.
+function getAvgLapPaceMs(swimmerId, event){
+  const entries = Object.values(allSwimTimes[swimmerId] || {})
+    .filter(e => e.event === event && !e.cancelled && e.splits && e.splits.length > 0);
+  if(entries.length === 0) return null;
+
+  let totalLapMs = 0, lapCount = 0;
+  entries.forEach(e => {
+    let prev = 0;
+    e.splits.forEach(splitMs => {
+      totalLapMs += (splitMs - prev);
+      lapCount++;
+      prev = splitMs;
+    });
+  });
+  return lapCount > 0 ? totalLapMs / lapCount : null;
+}
+
+// Fallback for a swimmer with no history at this distance: use the pace
+// from their own splits earlier in THIS swim instead. Averages whatever
+// laps they've already swum this time — with only one split so far, that's
+// just their latest split; with more, it smooths across what's known.
+// Still returns null with zero splits — there's nothing to compare against
+// on someone's very first lap of their very first swim at this distance.
+function getLocalPaceMs(swimmer){
+  if(!swimmer.splits || swimmer.splits.length === 0) return null;
+  let total = 0, prev = 0;
+  swimmer.splits.forEach(splitMs => {
+    total += (splitMs - prev);
+    prev = splitMs;
+  });
+  return total / swimmer.splits.length;
+}
 
 /* ---------- Live session listener (scoped to this slot) ---------- */
 sessionRef.on('value', snap => {
@@ -601,8 +664,47 @@ function startCooldownTicker(){
     } else {
       renderSwimmerGrid(currentSession);
     }
+    checkAutoCount(currentSession);
   }, 1000);
 }
+
+// Detects a likely-missed tap using each swimmer's own historical pace for
+// this exact distance, and auto-logs one lap using an estimated (not late)
+// time. Never guesses for a swimmer with no prior history at this event.
+function checkAutoCount(session){
+  if(!autoCountEnabled || session.paused || !session.active) return;
+
+  const now = Date.now();
+  const swimmers = session.swimmers || {};
+  const event = `${session.distance}m`;
+  const SAFETY_MULTIPLIER = 1.8; // must be this far past their usual pace before auto-logging
+
+  Object.entries(swimmers).forEach(([id, s]) => {
+    if(s.finished) return;
+
+    const delayMs = s.startDelayMs || 0;
+    const effectiveStart = session.startTime + delayMs;
+    if(now < effectiveStart) return; // hasn't actually started yet
+
+    // Prefer real history at this exact distance; if there's none, fall
+    // back to this swimmer's own pace earlier in the current swim.
+    let avgPaceMs = getAvgLapPaceMs(id, event);
+    if(avgPaceMs === null){
+      avgPaceMs = getLocalPaceMs(s);
+    }
+    if(avgPaceMs === null || avgPaceMs <= 0) return; // nothing to compare against yet — never guess
+
+    const lastSplitMs = (s.splits && s.splits.length > 0) ? s.splits[s.splits.length - 1] : 0;
+    const elapsedSinceStart = now - effectiveStart;
+    const elapsedSinceLastSplit = elapsedSinceStart - lastSplitMs;
+
+    if(elapsedSinceLastSplit > avgPaceMs * SAFETY_MULTIPLIER){
+      const estimatedElapsedMs = lastSplitMs + avgPaceMs;
+      tapSwimmer(id, session.startTime, session.sessionId || session.startTime, true, estimatedElapsedMs);
+    }
+  });
+}
+
 function stopCooldownTicker(){
   if(cooldownInterval) clearInterval(cooldownInterval);
   cooldownInterval = null;
@@ -811,17 +913,17 @@ function renderSwimmerGrid(session){
     }
 
     if(s.finished && s.recordFlag){
-      refs.hint.textContent = '🏆 New club record!';
+      refs.hint.innerHTML = '🏆 New club record!' + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else if(s.finished){
-      refs.hint.textContent = 'Finished';
+      refs.hint.innerHTML = 'Finished' + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else if(notYetStarted){
       refs.hint.textContent = `Starts in ${Math.ceil(remainingDelayMs / 1000)}s`;
     } else if(inCooldown){
-      refs.hint.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
+      refs.hint.innerHTML = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s` + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else if(isLastLap){
-      refs.hint.textContent = 'Last lap!';
+      refs.hint.innerHTML = 'Last lap!' + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else {
-      refs.hint.textContent = 'Tap after every 2 laps';
+      refs.hint.innerHTML = 'Tap after every 2 laps' + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     }
 
     // reassigning .onclick is cheap and safe — doesn't touch the DOM node itself
@@ -967,17 +1069,17 @@ function renderCompactList(session){
     refs.nameEl.textContent = `${s.name} ${s.surname}`;
 
     if(s.finished && s.recordFlag){
-      refs.subEl.textContent = '🏆 New club record!';
+      refs.subEl.innerHTML = '🏆 New club record!' + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else if(s.finished){
-      refs.subEl.textContent = 'Finished';
+      refs.subEl.innerHTML = 'Finished' + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else if(notYetStarted){
       refs.subEl.textContent = `Starts in ${Math.ceil(remainingDelayMs / 1000)}s`;
     } else if(inCooldown){
-      refs.subEl.textContent = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s`;
+      refs.subEl.innerHTML = `Wait ${Math.ceil(remainingCooldownMs / 1000)}s` + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else if(isLastLap){
-      refs.subEl.textContent = 'Last lap!';
+      refs.subEl.innerHTML = 'Last lap!' + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     } else {
-      refs.subEl.textContent = `${session.distance}m swim`;
+      refs.subEl.innerHTML = `${session.distance}m swim` + (s.autoTapped ? '<span class="auto-badge">Auto</span>' : '');
     }
 
     if(s.finished){
@@ -1036,24 +1138,32 @@ function renderCompactList(session){
 }
 
 /* ---------- Tap handler (atomic transaction) ---------- */
-function tapSwimmer(id, startTime, sessionId){
+function tapSwimmer(id, startTime, sessionId, isAuto, estimatedElapsedMs){
   const swimmerRef = db.ref(`liveSessions/${slot}/swimmers/${id}`);
 
   swimmerRef.transaction(current => {
     if(!current || current.finished) return current;
-    if(current.cooldownUntil && current.cooldownUntil > Date.now()) return current;
+    if(!isAuto && current.cooldownUntil && current.cooldownUntil > Date.now()) return current;
 
     current.previousRemaining = current.remaining;
     current.previousFinished = current.finished || false;
     current.previousFinishTimeMs = current.finishTimeMs || null;
     current.previousSplits = current.splits ? [...current.splits] : [];
     current.previousHistoryKey = current.historyKey || null;
+    current.previousAutoTapped = current.autoTapped || false;
 
     const newRemaining = current.remaining - TAP_DECREMENT_M;
-    const elapsedNow = (Date.now() - startTime) - (current.startDelayMs || 0);
+    // Auto-taps use an ESTIMATED elapsed time (based on the swimmer's own
+    // pace history), not the late wall-clock moment they were detected —
+    // that keeps a missed-tap correction close to their real pace instead
+    // of inflating their time by however long the coach was distracted.
+    const elapsedNow = isAuto
+      ? Math.round(estimatedElapsedMs)
+      : (Date.now() - startTime) - (current.startDelayMs || 0);
 
     current.splits = current.splits || [];
     current.splits.push(elapsedNow);
+    current.autoTapped = !!isAuto;
 
     if(newRemaining <= 0){
       current.remaining = 0;
@@ -1089,6 +1199,8 @@ function adjustRemaining(id, deltaM, startTime, sessionId){
     current.previousFinished = current.finished || false;
     current.previousFinishTimeMs = current.finishTimeMs || null;
     current.previousHistoryKey = current.historyKey || null;
+    current.previousAutoTapped = current.autoTapped || false;
+    current.autoTapped = false; // a manual correction always clears the auto-flag
 
     let newRemaining = (current.remaining || 0) - deltaM;
     if(newRemaining < 0) newRemaining = 0;
@@ -1128,11 +1240,13 @@ function undoLastTap(id){
     current.finishTimeMs = current.previousFinishTimeMs;
     current.splits = current.previousSplits || [];
     current.historyKey = current.previousHistoryKey || null;
+    current.autoTapped = current.previousAutoTapped || false;
     current.previousRemaining = null;
     current.previousFinished = null;
     current.previousFinishTimeMs = null;
     current.previousSplits = null;
     current.previousHistoryKey = null;
+    current.previousAutoTapped = null;
     current.cooldownUntil = 0; // explicit past timestamp — guarantees zero wait, avoids null/deleted-field ambiguity
     current.skipNextCooldown = true; // the NEXT tap also skips its own cooldown
     current._historyKeyToRemove = (wasFinished && !current.finished) ? keyBeingUndone : null;
