@@ -744,15 +744,59 @@ function renderRosterManageList(){
         selectedIds.delete(id);
       };
 
+      const wipeBtn = document.createElement('button');
+      wipeBtn.className = 'icon-btn danger';
+      wipeBtn.textContent = 'Wipe';
+      wipeBtn.title = 'Fully delete this swimmer and everything about them — for test data';
+      wipeBtn.onclick = () => wipeSwimmerCompletely(id, s);
+
       row.appendChild(nameEl);
       row.appendChild(editBtn);
       row.appendChild(deleteBtn);
+      row.appendChild(wipeBtn);
     }
 
     rosterManageList.appendChild(row);
   });
 }
 
+/* Fully removes a swimmer: roster entry, all recorded times/splits, any
+   trace in currently-running sessions across all 5 slots, and any trace
+   in past Session History. Meant for cleaning out test/junk swimmers —
+   unlike the regular Delete button, this leaves nothing behind. */
+function wipeSwimmerCompletely(id, swimmer){
+  const label = `${swimmer.name} ${swimmer.surname}`;
+  if(!confirm(`Completely wipe ${label}? This deletes their roster entry, every recorded time and split, and removes them from all session history. This cannot be undone.`)) return;
+  if(!confirm(`Really sure? There is no way to recover ${label}'s data after this.`)) return;
+
+  const updates = {};
+  updates[`roster/${id}`] = null;
+  updates[`swimmerTimes/${id}`] = null;
+  for(let s = 1; s <= NUM_SLOTS; s++){
+    updates[`liveSessions/${s}/swimmers/${id}`] = null;
+  }
+
+  db.ref().update(updates).then(() => {
+    selectedIds.delete(id);
+    delete swimmerDelays[id];
+    delete swimmerLanes[id];
+
+    // completedSessions is keyed by session push-id, not swimmer id, so it
+    // needs a read first to find which sessions (if any) mention them
+    db.ref('completedSessions').once('value', snap => {
+      const sessions = snap.val() || {};
+      const csUpdates = {};
+      Object.keys(sessions).forEach(sid => {
+        if(sessions[sid].swimmers && sessions[sid].swimmers[id] !== undefined){
+          csUpdates[`completedSessions/${sid}/swimmers/${id}`] = null;
+        }
+      });
+      if(Object.keys(csUpdates).length > 0){
+        db.ref().update(csUpdates);
+      }
+    });
+  });
+}
 addSwimmerBtn.onclick = () => {
   const name = newNameInput.value.trim();
   const surname = newSurnameInput.value.trim();
@@ -805,9 +849,33 @@ importFileInput.addEventListener('change', () => {
   reader.onload = (e) => {
     try{
       const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, { type: 'array' });
+      const workbook = XLSX.read(data, { type: 'array', cellDates: true });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+      // Get every row as a raw array first — don't assume row 1 is the
+      // header row, since real spreadsheets often have a title/date row
+      // above the actual column headers.
+      const rawRows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
+
+      const isHeaderRow = (row) => {
+        const cells = row.map(c => String(c).trim().toLowerCase());
+        return cells.includes('name') && cells.includes('surname');
+      };
+
+      const headerRowIndex = rawRows.findIndex(isHeaderRow);
+      if(headerRowIndex === -1){
+        importPreview.innerHTML = `<p style="color:var(--coral); font-size:13px;">Couldn't find a row with both "Name" and "Surname" column headers anywhere in the sheet.</p>`;
+        return;
+      }
+
+      const headers = rawRows[headerRowIndex].map(h => String(h).trim());
+      const dataRows = rawRows.slice(headerRowIndex + 1);
+
+      const rows = dataRows.map(rowArr => {
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = rowArr[i] !== undefined ? rowArr[i] : ''; });
+        return obj;
+      });
 
       parsedImportRows = rows.map(row => {
         // match column headers case-insensitively, allow a few common variants
