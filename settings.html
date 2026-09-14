@@ -335,29 +335,38 @@ const bubbleToggle = document.getElementById('bubbleToggle');
 const autoCountToggle = document.getElementById('autoCountToggle');
 const saveNote = document.getElementById('saveNote');
 
-let loadedFromFirebase = false;
+// Guards every toggle's change handler until its own value has loaded from
+// Firebase at least once. Without this, a click that lands before the
+// initial snapshot arrives would write back the checkbox's blank default
+// DOM state (unchecked) instead of the real stored value — previously only
+// the cooldown toggle had this protection.
+let cooldownLoaded = false;
+let bubbleLoaded = false;
+let autoCountLoaded = false;
 
 db.ref('settings/cooldownEnabled').on('value', snap => {
   const enabled = snap.val();
   // default to true (cooldown ON) if never set before
   cooldownToggle.checked = (enabled === null) ? true : !!enabled;
-  loadedFromFirebase = true;
+  cooldownLoaded = true;
 });
 
 db.ref('settings/bubbleSortEnabled').on('value', snap => {
   const enabled = snap.val();
   // default to true (bubble sort ON) if never set before
   bubbleToggle.checked = (enabled === null) ? true : !!enabled;
+  bubbleLoaded = true;
 });
 
 db.ref('settings/autoCountEnabled').on('value', snap => {
   const enabled = snap.val();
   // default to false (OFF) — this changes recorded data, opt-in only
   autoCountToggle.checked = !!enabled;
+  autoCountLoaded = true;
 });
 
 cooldownToggle.addEventListener('change', () => {
-  if(!loadedFromFirebase) return;
+  if(!cooldownLoaded) return;
   db.ref('settings/cooldownEnabled').set(cooldownToggle.checked).then(() => {
     saveNote.classList.add('show');
     setTimeout(() => saveNote.classList.remove('show'), 1800);
@@ -365,6 +374,7 @@ cooldownToggle.addEventListener('change', () => {
 });
 
 autoCountToggle.addEventListener('change', () => {
+  if(!autoCountLoaded) return;
   db.ref('settings/autoCountEnabled').set(autoCountToggle.checked).then(() => {
     saveNote.classList.add('show');
     setTimeout(() => saveNote.classList.remove('show'), 1800);
@@ -372,6 +382,7 @@ autoCountToggle.addEventListener('change', () => {
 });
 
 bubbleToggle.addEventListener('change', () => {
+  if(!bubbleLoaded) return;
   db.ref('settings/bubbleSortEnabled').set(bubbleToggle.checked).then(() => {
     saveNote.classList.add('show');
     setTimeout(() => saveNote.classList.remove('show'), 1800);
