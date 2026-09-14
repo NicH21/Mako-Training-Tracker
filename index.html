@@ -685,7 +685,7 @@ function checkAutoCount(session){
   const now = Date.now();
   const swimmers = session.swimmers || {};
   const event = `${session.distance}m`;
-  const SAFETY_MULTIPLIER = 1.8; // must be this far past their usual pace before auto-logging
+  const SAFETY_MULTIPLIER = 1.5; // must be this far past their usual pace before auto-logging
 
   Object.entries(swimmers).forEach(([id, s]) => {
     if(s.finished) return;
