@@ -492,7 +492,7 @@
 <section class="lanes-container" id="lanesContainer"></section>
 <section class="compact-list" id="compactList" style="display:none;"></section>
 
-<footer>Tap a name after every 2 laps (50m) &middot; times lock automatically at zero &middot; card flashes red on the last lap<br><span style="opacity:.5; font-size:10px;">build v9-cooldown-fix</span></footer>
+<footer>Tap a name after every 2 laps (50m) &middot; times lock automatically at zero &middot; card flashes red on the last lap</footer>
 
 <script>
 const firebaseConfig = {
@@ -671,6 +671,14 @@ function startCooldownTicker(){
 // Detects a likely-missed tap using each swimmer's own historical pace for
 // this exact distance, and auto-logs one lap using an estimated (not late)
 // time. Never guesses for a swimmer with no prior history at this event.
+//
+// Guarded by autoTapInFlight so a slow round-trip to Firebase can't cause
+// the same missed lap to be logged twice: checkAutoCount runs off the
+// locally-cached session, which may not reflect a just-submitted auto-tap
+// until the next snapshot arrives, so without this guard two ticks in a
+// row could both decide "still behind pace" and each fire their own tap.
+const autoTapInFlight = new Set();
+
 function checkAutoCount(session){
   if(!autoCountEnabled || session.paused || !session.active) return;
 
@@ -681,6 +689,7 @@ function checkAutoCount(session){
 
   Object.entries(swimmers).forEach(([id, s]) => {
     if(s.finished) return;
+    if(autoTapInFlight.has(id)) return; // already auto-tapping this swimmer — wait for it to land
 
     const delayMs = s.startDelayMs || 0;
     const effectiveStart = session.startTime + delayMs;
@@ -700,7 +709,10 @@ function checkAutoCount(session){
 
     if(elapsedSinceLastSplit > avgPaceMs * SAFETY_MULTIPLIER){
       const estimatedElapsedMs = lastSplitMs + avgPaceMs;
-      tapSwimmer(id, session.startTime, session.sessionId || session.startTime, true, estimatedElapsedMs);
+      autoTapInFlight.add(id);
+      tapSwimmer(id, session.startTime, session.sessionId || session.startTime, true, estimatedElapsedMs, () => {
+        autoTapInFlight.delete(id);
+      });
     }
   });
 }
@@ -708,6 +720,7 @@ function checkAutoCount(session){
 function stopCooldownTicker(){
   if(cooldownInterval) clearInterval(cooldownInterval);
   cooldownInterval = null;
+  autoTapInFlight.clear();
 }
 
 /* ---------- Pause / resume ---------- */
@@ -1138,7 +1151,7 @@ function renderCompactList(session){
 }
 
 /* ---------- Tap handler (atomic transaction) ---------- */
-function tapSwimmer(id, startTime, sessionId, isAuto, estimatedElapsedMs){
+function tapSwimmer(id, startTime, sessionId, isAuto, estimatedElapsedMs, onSettled){
   const swimmerRef = db.ref(`liveSessions/${slot}/swimmers/${id}`);
 
   swimmerRef.transaction(current => {
@@ -1151,6 +1164,7 @@ function tapSwimmer(id, startTime, sessionId, isAuto, estimatedElapsedMs){
     current.previousSplits = current.splits ? [...current.splits] : [];
     current.previousHistoryKey = current.historyKey || null;
     current.previousAutoTapped = current.autoTapped || false;
+    current.previousRecordFlag = current.recordFlag || false;
 
     const newRemaining = current.remaining - TAP_DECREMENT_M;
     // Auto-taps use an ESTIMATED elapsed time (based on the swimmer's own
@@ -1175,6 +1189,9 @@ function tapSwimmer(id, startTime, sessionId, isAuto, estimatedElapsedMs){
       current.historyKey = `${id}_${sessionId}`;
     } else {
       current.remaining = newRemaining;
+      // a fresh, un-finished lap is never a "record" lap yet — clear any
+      // stale flag left over from an earlier finish that got corrected
+      current.recordFlag = false;
     }
 
     current.cooldownUntil = (cooldownEnabled && !current.skipNextCooldown) ? Date.now() + COOLDOWN_MS : 0;
@@ -1187,6 +1204,7 @@ function tapSwimmer(id, startTime, sessionId, isAuto, estimatedElapsedMs){
         saveToHistory(id, val);
       }
     }
+    if(onSettled) onSettled();
   });
 }
 
@@ -1200,20 +1218,32 @@ function adjustRemaining(id, deltaM, startTime, sessionId){
     current.previousFinishTimeMs = current.finishTimeMs || null;
     current.previousHistoryKey = current.historyKey || null;
     current.previousAutoTapped = current.autoTapped || false;
+    current.previousRecordFlag = current.recordFlag || false;
     current.autoTapped = false; // a manual correction always clears the auto-flag
 
     let newRemaining = (current.remaining || 0) - deltaM;
     if(newRemaining < 0) newRemaining = 0;
 
     current.remaining = newRemaining;
+    // The historyKey this swimmer would use if/when they finish THIS
+    // session — stable regardless of how many times they cross zero.
+    const finishHistoryKey = `${id}_${sessionId}`;
+
     if(newRemaining <= 0 && !current.finished){
       current.finished = true;
       current.finishTimeMs = (Date.now() - startTime) - (current.startDelayMs || 0);
-      current.historyKey = `${id}_${sessionId}`;
+      current.historyKey = finishHistoryKey;
     } else if(newRemaining > 0 && current.finished){
+      // Un-finishing a correction: the earlier finish already got written
+      // to permanent history (swimmerTimes) by saveToHistory. Leaving it
+      // there would orphan a phantom finish time that no longer matches
+      // this swimmer's live state, so flag it for deletion in the
+      // callback below — mirrors what undoLastTap already does.
+      current._historyKeyToRemove = current.historyKey || null;
       current.finished = false;
       current.finishTimeMs = null;
       current.historyKey = null;
+      current.recordFlag = false; // no longer a finish at all, let alone a record
     }
     return current;
   }, (error, committed, snap) => {
@@ -1221,6 +1251,10 @@ function adjustRemaining(id, deltaM, startTime, sessionId){
       const val = snap.val();
       if(val.finished && !val.previousFinished){
         saveToHistory(id, val);
+      }
+      if(val && val._historyKeyToRemove){
+        db.ref(`swimmerTimes/${id}/${val._historyKeyToRemove}`).remove();
+        db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ _historyKeyToRemove: null });
       }
     }
   });
@@ -1241,12 +1275,14 @@ function undoLastTap(id){
     current.splits = current.previousSplits || [];
     current.historyKey = current.previousHistoryKey || null;
     current.autoTapped = current.previousAutoTapped || false;
+    current.recordFlag = current.previousRecordFlag || false;
     current.previousRemaining = null;
     current.previousFinished = null;
     current.previousFinishTimeMs = null;
     current.previousSplits = null;
     current.previousHistoryKey = null;
     current.previousAutoTapped = null;
+    current.previousRecordFlag = null;
     current.cooldownUntil = 0; // explicit past timestamp — guarantees zero wait, avoids null/deleted-field ambiguity
     current.skipNextCooldown = true; // the NEXT tap also skips its own cooldown
     current._historyKeyToRemove = (wasFinished && !current.finished) ? keyBeingUndone : null;
@@ -1305,9 +1341,15 @@ function saveToHistory(id, swimmerState){
         });
       });
 
-      if(bestForEvent === entry.timeMs){
-        db.ref(`liveSessions/${slot}/swimmers/${id}`).update({ recordFlag: true });
-      }
+      // Only set the flag when this finish is still the current finish for
+      // this swimmer (they haven't been undone/corrected in the meantime)
+      // — otherwise a slow record check could stamp a record flag onto a
+      // swim that's already been superseded.
+      db.ref(`liveSessions/${slot}/swimmers/${id}`).transaction(current => {
+        if(!current || current.historyKey !== historyKey) return current;
+        current.recordFlag = (bestForEvent === entry.timeMs);
+        return current;
+      });
     });
   });
 }
