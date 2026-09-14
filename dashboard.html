@@ -622,6 +622,32 @@ function renderSwimmerPicker(){
 }
 
 /* ---------- Individual view ---------- */
+
+// Best time per event within a set of entries. Scoped per event so a PB
+// (or the "Personal best" stat) never compares a 100m swim against an
+// 800m swim just because "All events" happens to be selected.
+function computeBestByEvent(entries){
+  const bestByEvent = {};
+  entries.forEach(e => {
+    if(!bestByEvent[e.event] || e.timeMs < bestByEvent[e.event].timeMs){
+      bestByEvent[e.event] = e;
+    }
+  });
+  return bestByEvent;
+}
+
+// Nearest EARLIER entry with the same event as sortedDesc[index] (sortedDesc
+// is most-recent-first). Used instead of "the previous row" so a "Change"
+// figure never diffs against a different distance just because it happened
+// to be swum in between two same-event swims.
+function findPrevSameEvent(sortedDesc, index){
+  const event = sortedDesc[index].event;
+  for(let j = index + 1; j < sortedDesc.length; j++){
+    if(sortedDesc[j].event === event) return sortedDesc[j];
+  }
+  return null;
+}
+
 function renderIndividual(id){
   const panel = document.getElementById('individualPanel');
   const swimmer = roster[id];
@@ -655,9 +681,16 @@ function renderIndividual(id){
     return;
   }
 
-  const best = entries.reduce((min, e) => e.timeMs < min.timeMs ? e : min, entries[0]);
   const last = entries[entries.length - 1];
-  const prev = entries.length > 1 ? entries[entries.length - 2] : null;
+
+  // Personal best and "change vs previous" are always computed within the
+  // SAME event as the most recent swim — when "All events" is selected,
+  // entries mixes every distance together, and comparing (say) a 1500m
+  // time against an 800m time isn't a meaningful "faster/slower" figure.
+  const sameEventEntries = entries.filter(e => e.event === last.event);
+  const best = sameEventEntries.reduce((min, e) => e.timeMs < min.timeMs ? e : min, sameEventEntries[0]);
+  const lastIdxWithinEvent = sameEventEntries.indexOf(last);
+  const prev = lastIdxWithinEvent > 0 ? sameEventEntries[lastIdxWithinEvent - 1] : null;
 
   document.getElementById('statBest').textContent = formatTime(best.timeMs);
   document.getElementById('statBestSub').textContent = `${best.event} · ${formatDate(best.date)}`;
@@ -672,11 +705,11 @@ function renderIndividual(id){
     const faster = deltaMs < 0;
     deltaEl.textContent = `${faster ? '−' : '+'}${formatTime(Math.abs(deltaMs))}`;
     deltaEl.className = 'stat-value ' + (faster ? 'good' : 'bad');
-    deltaSubEl.textContent = faster ? 'Faster than previous swim' : 'Slower than previous swim';
+    deltaSubEl.textContent = (faster ? 'Faster than previous ' : 'Slower than previous ') + `${last.event} swim`;
   } else {
     deltaEl.textContent = '—';
     deltaEl.className = 'stat-value';
-    deltaSubEl.textContent = 'Need a second swim to compare';
+    deltaSubEl.textContent = `Need a second ${last.event} swim to compare`;
   }
 
   document.getElementById('statCount').textContent = entries.length;
@@ -685,9 +718,9 @@ function renderIndividual(id){
     : 'across all events';
 
   renderIndividualChart(entries);
-  renderHistoryTable(entries, best.entryId);
+  renderHistoryTable(entries);
 
-  document.getElementById('exportSwimmerBtn').onclick = () => exportSwimmerExcel(swimmer, entries, best.entryId);
+  document.getElementById('exportSwimmerBtn').onclick = () => exportSwimmerExcel(swimmer, entries);
 }
 
 /* ---------- Manual time entry (for pre-app swims) ---------- */
@@ -872,12 +905,17 @@ function renderIndividualChart(entries){
   });
 }
 
-function renderHistoryTable(entries, bestEntryId){
+function renderHistoryTable(entries){
   const body = document.getElementById('historyTableBody');
   body.innerHTML = '';
+
+  const bestByEvent = computeBestByEvent(entries);
   const sorted = [...entries].reverse();
+
   sorted.forEach((e, i) => {
-    const prevEntry = sorted[i + 1];
+    // nearest earlier swim of the SAME event — not just the row above,
+    // which under "All events" could be a completely different distance
+    const prevEntry = findPrevSameEvent(sorted, i);
     const row = document.createElement('tr');
 
     const dateCell = document.createElement('td');
@@ -888,7 +926,7 @@ function renderHistoryTable(entries, bestEntryId){
 
     const timeCell = document.createElement('td');
     timeCell.textContent = formatTime(e.timeMs);
-    if(e.entryId === bestEntryId){
+    if(bestByEvent[e.event] && e.entryId === bestByEvent[e.event].entryId){
       const badge = document.createElement('span');
       badge.className = 'pb-badge';
       badge.textContent = 'PB';
@@ -1128,11 +1166,22 @@ function renderLeaderboard(){
   bests.forEach((b, i) => {
     const row = document.createElement('div');
     row.className = 'leaderboard-row';
-    row.innerHTML = `
-      <div class="leaderboard-rank">${i + 1}</div>
-      <div class="leaderboard-name">${b.name}</div>
-      <div class="leaderboard-time">${formatTime(b.timeMs)}<span class="leaderboard-sub">${formatDate(b.date)}</span></div>
-    `;
+    const rank = document.createElement('div');
+    rank.className = 'leaderboard-rank';
+    rank.textContent = String(i + 1);
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'leaderboard-name';
+    nameDiv.textContent = b.name;
+    const timeDiv = document.createElement('div');
+    timeDiv.className = 'leaderboard-time';
+    timeDiv.textContent = formatTime(b.timeMs);
+    const sub = document.createElement('span');
+    sub.className = 'leaderboard-sub';
+    sub.textContent = formatDate(b.date);
+    timeDiv.appendChild(sub);
+    row.appendChild(rank);
+    row.appendChild(nameDiv);
+    row.appendChild(timeDiv);
     list.appendChild(row);
   });
 }
@@ -1250,11 +1299,26 @@ function renderRecords(){
     const swimmer = roster[rec.id];
     const row = document.createElement('div');
     row.className = 'leaderboard-row';
-    row.innerHTML = `
-      <div class="leaderboard-rank">🏆</div>
-      <div class="leaderboard-name">${event}<span class="leaderboard-sub">${swimmer.name} ${swimmer.surname}</span></div>
-      <div class="leaderboard-time">${formatTime(rec.timeMs)}<span class="leaderboard-sub">${formatDate(rec.date)}</span></div>
-    `;
+    const rank = document.createElement('div');
+    rank.className = 'leaderboard-rank';
+    rank.textContent = '🏆';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'leaderboard-name';
+    nameDiv.textContent = event;
+    const nameSub = document.createElement('span');
+    nameSub.className = 'leaderboard-sub';
+    nameSub.textContent = `${swimmer.name} ${swimmer.surname}`;
+    nameDiv.appendChild(nameSub);
+    const timeDiv = document.createElement('div');
+    timeDiv.className = 'leaderboard-time';
+    timeDiv.textContent = formatTime(rec.timeMs);
+    const timeSub = document.createElement('span');
+    timeSub.className = 'leaderboard-sub';
+    timeSub.textContent = formatDate(rec.date);
+    timeDiv.appendChild(timeSub);
+    row.appendChild(rank);
+    row.appendChild(nameDiv);
+    row.appendChild(timeDiv);
     list.appendChild(row);
   });
 }
@@ -1415,7 +1479,7 @@ async function downloadWorkbook(workbook, filename){
   URL.revokeObjectURL(url);
 }
 
-async function exportSwimmerExcel(swimmer, entries, bestEntryId){
+async function exportSwimmerExcel(swimmer, entries){
   if(entries.length === 0) return;
 
   const workbook = new ExcelJS.Workbook();
@@ -1447,9 +1511,13 @@ async function exportSwimmerExcel(swimmer, entries, bestEntryId){
   const headerRow = ws.addRow(['Date', 'Event', 'Time', 'Change']);
   styleHeaderRow(headerRow);
 
+  // Same per-event scoping as the on-screen history table — a "Change"
+  // column and PB highlight that mixed distances together would be
+  // meaningless once a report covers more than one event.
+  const bestByEvent = computeBestByEvent(entries);
   const sorted = [...entries].reverse(); // most recent first, matches on-screen table
   sorted.forEach((e, i) => {
-    const prevEntry = sorted[i + 1];
+    const prevEntry = findPrevSameEvent(sorted, i);
     let changeStr = '—';
     if(prevEntry){
       const deltaMs = e.timeMs - prevEntry.timeMs;
@@ -1457,7 +1525,7 @@ async function exportSwimmerExcel(swimmer, entries, bestEntryId){
     }
     const row = ws.addRow([formatDate(e.date), e.event, formatTime(e.timeMs) + (e.manualEntry ? ' (manual)' : ''), changeStr]);
     styleDataRow(row);
-    if(e.entryId === bestEntryId){
+    if(bestByEvent[e.event] && e.entryId === bestByEvent[e.event].entryId){
       row.eachCell(cell => { cell.fill = PB_FILL; });
     }
   });
